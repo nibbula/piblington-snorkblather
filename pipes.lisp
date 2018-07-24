@@ -177,7 +177,7 @@
 (defun pipes (&key modeline paused (wrap t) (type :normal) (frame-rate 60) bold
 		cursor 7-color (number 3) (reset-interval 2000)
 		(color-change-probability .01) #| color-walk |#)
-  (with-terminal (:ansi)
+  (with-terminal (#+unix :ansi)
     (let ((char-array (second (assoc (keywordify type) *pipe-type*)))
 	  pipes
 	  (count 0)
@@ -251,7 +251,6 @@
 		  (setf fg (random-color)))
 
 		(tt-color fg :black)
-		(tt-move-to y x)
 
 		;; Wrap pipes around the edges
 		(when wrap
@@ -260,6 +259,8 @@
 		    ((>= y (1- (tt-height))) (setf y 0))
 		    ((< x 0)                 (setf x (1- (tt-width))))
 		    ((>= x (1- (tt-width)))  (setf x 0))))
+
+		(tt-move-to y x)
 
 		;; Randomly turn
 		(if (= (random *turn-prob*) (/ *turn-prob* 2))

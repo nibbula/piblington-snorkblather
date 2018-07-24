@@ -10,6 +10,6 @@
     :license            "GPLv3"
     :source-control	:git
     :long-description   "This is like an old timey program."
-    :depends-on (:curses :dlib :fui :terminal :terminal-curses)
+    :depends-on (:dlib :terminal)
     :components
     ((:file "rain")))

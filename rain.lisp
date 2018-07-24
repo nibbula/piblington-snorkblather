@@ -10,8 +10,8 @@
 
 (defpackage :rain
   (:documentation "Rain on the screen.")
-  (:shadowing-import-from :curses #:timeout)
-  (:use :cl :curses :dlib :fui :terminal :terminal-curses)
+  ;; (:shadowing-import-from :curses #:timeout)
+  (:use :cl :dlib :terminal)
   (:export
    #:rain
    #:!rain
@@ -65,7 +65,7 @@
 (defclass drop ()
   ((x :initarg :x :accessor drop-x :initform 0 #| :type fixnum |#)
    (y :initarg :y :accessor drop-y :initform 0 #| :type fixnum |#)
-   (color :initarg :color :accessor drop-color :type integer :initform 0))
+   (color :initarg :color :accessor drop-color :type list :initform nil))
   (:documentation "Generic precipitation drop."))
 
 (defgeneric draw-drop (sky drop)
@@ -76,40 +76,11 @@
   (:method ((sky sky))
     (loop :for d :in (drops sky) :do (draw-drop sky d))))
 
-(defparameter *drop-colors*
-  #.(vector curses:+COLOR-BLUE+ curses:+COLOR-CYAN+ curses:+COLOR-WHITE+))
+(defparameter *drop-colors* #.(vector :blue :cyan :white))
 (declaim (type (simple-vector 3) *drop-colors*))
 
 (defun random-color ()
-  (color-index (elt *drop-colors*
-		    (random (length *drop-colors*)))
-	       +COLOR-BLACK+))
-
-#+curses-use-wide
-(defun add-wide-string (wide-string)
-  (declare (type string wide-string))
-  (cffi:with-foreign-object (fstr :int (1+ (length wide-string)))
-      (loop :with i = 0 :for c :across wide-string :do
-	 (setf (cffi:mem-aref fstr :int i) (char-code c))
-	 (incf i))
-      (setf (cffi:mem-aref fstr :int (length wide-string)) 0)
-      (addnwstr fstr (length wide-string))))
-
-(defvar *wide-char* (cffi:foreign-alloc :int :count 2))
-
-#+curses-use-wide
-(defun add-wide-char-OLD (wide-char)
-  (cffi:with-foreign-object (fstr :int 2)
-    (setf (cffi:mem-aref fstr :int 0) wide-char
-	  (cffi:mem-aref fstr :int 1) 0)
-    (addnwstr fstr 2)))
-
-#+curses-use-wide
-(defun add-wide-char (wide-char)
-  (setf (cffi:mem-aref *wide-char* :int 0) wide-char
-	(cffi:mem-aref *wide-char* :int 1) 0)
-    (addnwstr *wide-char* 2))
-
+  (cons (elt *drop-colors* (random (length *drop-colors*))) :black))
 
 #| Stolen from wikipedia:
 
@@ -265,11 +236,12 @@ public double nextGaussian() {
   (loop :for i :from 0 :to 99 :do
      (format t "~v,,,va~%" (aref aa i) #\# #\#)))
 (defun poo2 ()
-  (with-curses
-    (clear)
+  (with-terminal ()
+    (tt-clear)
     (loop :for i :from 0 :to 99 :do
-      (loop :for j :from 0 :below (aref aa i) :do
-	 (mvaddch (- *lines* (+ 1 j)) i (char-code #\#))))
+       (loop :for j :from 0 :below (aref aa i) :do
+	  (tt-move-to (- (tt-height) (+ 1 j)) i)
+	  (tt-write-char #\#)))
     (tt-get-char)))
 
 (defun foo1 ()
@@ -335,26 +307,34 @@ public double nextGaussian() {
   (with-slots (x y image color) drop
 ;;; (declare (type fixnum x y))
     (let ((dx (truncate x))
-	  (dy (truncate y)))
-      (declare (type fixnum dx dy))
-    (color-set (or color 0) (cffi:null-pointer))
-    (let ((img (aref images image)))
-      (with-slots ((cx x) (cy y) width height data wide) img
-	(declare (type fixnum cx cy))
-	(macrolet ((loopy (&body body)
-		      `(loop :for i :of-type fixnum :from 0 :below height :do
-			  (loop :for j :of-type fixnum :from 0 :below width :do
-			     (if (char/= (aref data i j) #\space)
-				 (progn ,@body))))))
-	  (if wide
-	      (loopy
-		 (move (+ (- dy cy) i)
-		       (+ (- dx cx) j))
-		 (add-wide-char (char-code (aref data i j))))
-	      (loopy
-		 (mvaddch (+ (- dy cy) i)
-			  (+ (- dx cx) j)
-			  (char-code (aref data i j)))))))))))
+	  (dy (truncate y))
+	  (screen-x 0) (screen-y 0)
+	  (screen-width (tt-width)) (screen-height (tt-height)))
+      (declare (type fixnum screen-x screen-y screen-width screen-height))
+      (tt-color (car color) (cdr color))
+      (let ((img (aref images image)))
+	(with-slots ((cx x) (cy y) width height data wide) img
+	  (declare (type fixnum cx cy))
+	  (macrolet ((loopy (&body body)
+			`(loop :for i :of-type fixnum :from 0 :below height :do
+			    (loop :for j :of-type fixnum :from 0 :below width :do
+			       (if (char/= (aref data i j) #\space)
+				   (progn ,@body))))))
+	    (if wide
+		(loopy
+		   (setf screen-y (+ (- dy cy) i)
+			 screen-x (+ (- dx cx) j))
+		   (when (and (>= screen-x 0) (< screen-x screen-width)
+			      (>= screen-y 0) (< screen-y screen-height))
+		     (tt-move-to screen-y screen-x)
+		     (tt-write-char (aref data i j))))
+		(loopy
+		   (setf screen-y (+ (- dy cy) i)
+			 screen-x (+ (- dx cx) j))
+		   (when (and (>= screen-x 0) (< screen-x screen-width)
+			      (>= screen-y 0) (< screen-y screen-height))
+		     (tt-move-to screen-y screen-x)
+		     (tt-write-char (aref data i j)))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Rain
@@ -426,8 +406,8 @@ public double nextGaussian() {
   "Create a drop in a rainy sky."
   (push
    (make-instance 'rain-drop
-		  :x (random curses:*cols*)
-		  :y (random curses:*lines*)
+		  :x (random (tt-width))
+		  :y (random (tt-height))
 		  :image 0 :color (random-color))
    (drops sky)))
 
@@ -461,64 +441,74 @@ public double nextGaussian() {
 (defclass snowy (sky)
   ((snow-pos
     :initarg :snow-pos :accessor snow-pos :initform nil #| :type fixnum |#
-    :documentation "Position of the snowbody.")))
+    :documentation "Position of the snowbody.")
+   (snow-chars
+    :initarg :snow-chars :accessor snow-chars
+    :documentation "Snow characters to use.")
+   (accumulation
+    :initarg :accumulation :accessor accumulate :initform 0.0 :type float
+    :documentation "Accumulation factor.")))
 
 (defclass snow-drop (drop)
   ((char :initarg :char :accessor snow-drop-char))
   (:documentation "Snow drop."))
 
-;; #.(code-char #x00002603) ; ☃ SNOWMAN
-(defparameter *snow-chars*
-  #(#.(char-code #\*)
-    #.(char-code #\.)
-    #x00002744 ; ❄ SNOWFLAKE
-    #x00002744 ; ❄ SNOWFLAKE
-    #x00002745 ; ❅ TIGHT_TRIFOLIATE_SNOWFLAKE
-    #x00002746 ; ❆ HEAVY_CHEVRON_SNOWFLAKE
-    #x00002735 ; ✵ EIGHT_POINTED_PINWHEEL_STAR
-    #x00002736 ; ✶ SIX_POINTED_BLACK_STAR
-    #x00002737 ; ✷ EIGHT_POINTED_RECTILINEAR_BLACK_STAR
-    #x00002738 ; ✸ HEAVY_EIGHT_POINTED_RECTILINEAR_BLACK_STAR
-    #x00002739 ; ✹ TWELVE_POINTED_BLACK_STAR
-    #x00002731 ; ✱ HEAVY_ASTERISK
-    #x00002732 ; ✲ OPEN_CENTRE_ASTERISK
-    #x0000274A ; ❊ EIGHT_TEARDROP-SPOKED_PROPELLER_ASTERISK
-;    #x0000FF0A ; ＊ FULLWIDTH_ASTERISK
+(defparameter *unicode-snow-chars*
+  #(#.(code-char #x00002603) ; ☃ SNOWMAN
+    #\*
+    #\.
+    #.(code-char #x00002744) ; ❄ SNOWFLAKE
+    #.(code-char #x00002744) ; ❄ SNOWFLAKE
+    #.(code-char #x00002745) ; ❅ TIGHT_TRIFOLIATE_SNOWFLAKE
+    #.(code-char #x00002746) ; ❆ HEAVY_CHEVRON_SNOWFLAKE
+    #.(code-char #x00002735) ; ✵ EIGHT_POINTED_PINWHEEL_STAR
+    #.(code-char #x00002736) ; ✶ SIX_POINTED_BLACK_STAR
+    #.(code-char #x00002737) ; ✷ EIGHT_POINTED_RECTILINEAR_BLACK_STAR
+    #.(code-char #x00002738) ; ✸ HEAVY_EIGHT_POINTED_RECTILINEAR_BLACK_STAR
+    #.(code-char #x00002739) ; ✹ TWELVE_POINTED_BLACK_STAR
+    #.(code-char #x00002731) ; ✱ HEAVY_ASTERISK
+    #.(code-char #x00002732) ; ✲ OPEN_CENTRE_ASTERISK
+    #.(code-char #x0000274A) ; ❊ EIGHT_TEARDROP-SPOKED_PROPELLER_ASTERISK
+;    #.(code-char #x0000FF0A) ; ＊ FULLWIDTH_ASTERISK
     ))
+
+(defparameter *ascii-snow-chars*
+  #(#\B #\* #\. #\* #\* #\:))
 
 (defmethod create-drop ((sky snowy))
   "Create a drop in the snowy sky."
   (push
    (make-instance 'snow-drop
-		  :x (random curses:*cols*)
-		  :y (random curses:*lines*)
-		  :char (random (length *snow-chars*))
-		  :color (color-index curses:+COLOR-WHITE+
-				      curses:+COLOR-BLACK+))
+		  :x (random (tt-width))
+		  :y (random (tt-height))
+		  :char (1+ (random (1- (length (snow-chars sky)))))
+		  :color (cons :white :black))
    (drops sky)))
 
 (defmethod draw-drop ((sky snowy) (drop snow-drop))
-  (declare (type snow-drop drop) (ignore sky))
+  (declare (type snow-drop drop))
   (with-slots (x y char color) drop
     (declare (type fixnum x y))
-    (color-set (or color 0) (cffi:null-pointer))
-    (let ((chr (aref *snow-chars* char)))
-      (move y x)
-      (add-wide-char chr))))
+    (tt-color (car color) (cdr color))
+    (let ((chr (aref (snow-chars sky) char)))
+      (when (and (>= y 0) #| they shouldn't go off the bottom |#
+		 (>= x 0) (< x (tt-width)))
+	(tt-move-to y x)
+	(tt-write-char chr)))))
 
 (defmethod drop-cycle ((sky snowy))
   (sleep .06)
   (loop :for d :in (copy-list (drops sky)) :do
      (incf (drop-y d))
      (incf (drop-x d) (- 1 (random 3)))
-     (when (> (drop-y d) (1- curses:*lines*))
+     (when (> (drop-y d) (1- (tt-height)))
        (setf (drops sky) (delete d (drops sky))))))
 
 (defmethod draw-background ((sky snowy))
   (when (not (snow-pos sky))
-    (setf (snow-pos sky) (random (1- curses:*cols*))))
-  (move (1- curses:*lines*) (snow-pos sky))
-  (add-wide-string "☃"))
+    (setf (snow-pos sky) (random (1- (tt-width)))))
+  (tt-move-to (1- (tt-height)) (snow-pos sky))
+  (tt-write-char (aref (snow-chars sky) 0)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Mutrix
@@ -533,7 +523,7 @@ public double nextGaussian() {
   "Initialize a Mutrix."
   (declare (ignore initargs))
   (setf (mutrix-bg o)
-	(make-array (list curses:*cols* curses:*lines*)
+	(make-array (list (tt-width) (tt-height))
 		    :element-type 'fixnum :initial-element 0)))
 
 (defclass mutrix-drop (drop)
@@ -576,22 +566,21 @@ public double nextGaussian() {
   "Create a drop in the Mutrix."
   (push
    (make-instance 'mutrix-drop
-		  :x (random curses:*cols*)
-		  :y (random curses:*lines*)
+		  :x (random (tt-width))
+		  :y (random (tt-height))
 		  :char (if (zerop (random 17)) 0 (nice-random-char))
-		  :color (color-index curses:+COLOR-WHITE+
-				      curses:+COLOR-BLACK+))
+		  :color (cons :white :black))
    (drops sky)))
 
 (defmethod draw-drop ((sky mutrix) (drop mutrix-drop))
   (declare (type mutrix-drop drop) (ignore sky))
   (with-slots (x y char color) drop
     (declare (type fixnum x y))
-    (color-set (or color 0) (cffi:null-pointer))
-    (move y x)
-    (attron +a-bold+)
-    (add-wide-char char)
-    (attroff +a-bold+)))
+    (tt-color (car color) (cdr color))
+    (tt-move-to y x)
+    (tt-bold t)
+    (tt-write-char (code-char char))
+    (tt-bold nil)))
 
 (defmethod drop-cycle ((sky mutrix))
   (loop :for d :in (copy-list (drops sky)) :do
@@ -599,22 +588,21 @@ public double nextGaussian() {
      (incf (drop-y d))
      (when (not (zerop (mutrix-drop-char d)))
        (incf (mutrix-drop-char d)))
-     (when (> (drop-y d) (1- curses:*lines*))
+     (when (> (drop-y d) (1- (tt-height)))
        (setf (drops sky) (delete d (drops sky))))))
 
 (defmethod draw-background ((sky mutrix))
   "Draw the mutable background."
-  (color-set (color-index curses:+COLOR-GREEN+ curses:+COLOR-BLACK+)
-             (cffi:null-pointer))
+  (tt-color :green :black)
   (loop
      :with height = (array-dimension (mutrix-bg sky) 1)
      :and width = (array-dimension (mutrix-bg sky) 0)
      :for y :of-type fixnum :from 0 :below height :do
      (loop :for x :of-type fixnum :from 0 :below width :do
-	(move y x)
+	(tt-move-to y x)
 	(let ((cc (aref (mutrix-bg sky) x y)))
 	  (when (/= cc 0)
-	    (add-wide-char cc))))))
+	    (tt-write-char (code-char cc)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Space
@@ -633,7 +621,14 @@ public double nextGaussian() {
     :documentation "Images of the stars.")
    (colorful
     :initarg :colorful :accessor colorful :initform nil :type boolean
-    :documentation "True if the stars are colorful."))
+    :documentation "True if the stars are colorful.")
+   (use-unicode
+    :initarg :use-unicode :accessor use-unicode :initform nil :type boolean
+    :documentation "True if the stars use unicode characters.")
+   (random-star-picker
+    :initarg :random-star-picker :accessor random-star-picker
+    :documentation "Function to pick a random star.")
+   )
   (:documentation "A starry sky."))
 
 ;;
@@ -694,7 +689,7 @@ public double nextGaussian() {
 ;  (data   #2A((#\x)) :type (simple-array character (* *))))
   data)
   
-(defparameter *star-images-init*
+(defparameter *unicode-star-images-init*
   #((0 0 #("."))
     (0 0 #("*"))
     (0 0 #("⭑")) ; BLACK_SMALL_STAR
@@ -731,35 +726,68 @@ public double nextGaussian() {
 	   " \\ / "
 	   "  -  "))))
 
+(defparameter *ascii-star-images-init*
+  #((0 0 #("."))
+    (0 0 #("*"))
+    (1 1 #(" - "
+	   "|.|"
+	   " - "))
+    (1 1 #(" | "
+	   "-*-"
+	   " | "))
+    (1 1 #("\\|/"
+	   "-*-"
+	   "/|\\"))
+    (2 2 #("  |  "
+	   " \\|/ "
+	   "--o--"
+	   " /|\\ "
+	   "  |  "))
+    (2 2 #("  -  "
+	   " / \\ "
+	   "| O |"
+	   " \\ / "
+	   "  -  "))))
+
 ;(defparameter *star-images* #())
 ;(declaim (type (simple-array drop-image *) *star-images*))
 
-(defmethod initialize-instance
-    :after ((o spacey) &rest initargs &key &allow-other-keys)
-  "Initialize a rainy sky."
-  (declare (ignore initargs))
-  (init-drop-images o *star-images-init*))
-
-(defparameter *star-colors*
-  #.(vector curses:+COLOR-BLUE+ curses:+COLOR-CYAN+ curses:+COLOR-WHITE+
-	    curses:+COLOR-MAGENTA+ curses:+COLOR-RED+ curses:+COLOR-GREEN+
-	    curses:+COLOR-YELLOW+))
-(declaim (type (simple-vector 7) *star-colors*))
-
-(defun star-color (sky)
-  (if (colorful sky)
-      (color-index (elt *star-colors*
-			(random (length *star-colors*)))
-		   +COLOR-BLACK+)
-      (color-index +COLOR-WHITE+ +COLOR-BLACK+)))
-
-(defun random-star-image ()
+(defun unicode-random-star-image ()
   (let ((r (random 100)))
     (cond
       ((< r 40) 0) 			; .
       ((< r 85) 1)			; *
       ((< r 95) (+ 2 (random 14)))	; fancy stars
       ((< r 100) (+ 14 (random 5))))))	; big stars
+
+(defun ascii-random-star-image ()
+  (let ((r (random 100)))
+    (cond
+      ((< r 40) 0) 			; .
+      ((< r 95) 1)			; *
+      ((< r 100) (+ 2 (random 5))))))	; big stars
+
+(defmethod initialize-instance
+    :after ((o spacey) &rest initargs &key &allow-other-keys)
+  "Initialize a rainy sky."
+  (declare (ignore initargs))
+  (init-drop-images o (if (use-unicode o)
+			  *unicode-star-images-init*
+			  *ascii-star-images-init*))
+  (setf (random-star-picker o) (if (use-unicode o)
+				   #'unicode-random-star-image
+				   #'ascii-random-star-image)))
+
+(defparameter *star-colors*
+  #.(vector :blue :cyan :white :magenta :red :green :yellow))
+(declaim (type (simple-vector 7) *star-colors*))
+
+(defun star-color (sky)
+  (if (colorful sky)
+      (cons (elt *star-colors*
+		 (random (length *star-colors*)))
+	    :black)
+      (cons :white :black)))
 
 (defun random-velocity (sky)
   (let ((r (random 100)))
@@ -785,10 +813,14 @@ public double nextGaussian() {
 	  free-list 0)))
 
 (defun msg (sky fmt &rest args)
-  (mvaddstr (1- curses:*lines*) 0 (apply #'format nil fmt args))
-  (timeout -1)
+  (declare (ignore sky))		; @@@
+  (tt-move-to (1- (tt-height)) 0)
+  (tt-format fmt args)
+  ;;(timeout -1)
   (tt-get-char)
-  (timeout (time-out sky)))
+  ;;(timeout (time-out sky))
+  ;;(tt-listen-for (/ time-out 100))
+  )
 
 (defmethod create-drop ((sky spacey))
   "Create a star in the sky."
@@ -806,10 +838,10 @@ public double nextGaussian() {
     (let (star (i free-list))
       (setf free-list (star-free (aref drops free-list))
 	    star (aref drops i)
-	    (drop-x star) (float (/ curses:*cols* 2))
-	    (drop-y star) (float (/ curses:*lines* 2))
+	    (drop-x star) (float (/ (tt-width) 2))
+	    (drop-y star) (float (/ (tt-height) 2))
 	    (drop-color star) (star-color sky)
-	    (image-drop-image star) (random-star-image)
+	    (image-drop-image star) (funcall (random-star-picker sky))
 	    (star-x-inc star) 0.0
 	    (star-y-inc star) 0.0
 	    (star-direction star) (random 360.0)
@@ -846,53 +878,64 @@ public double nextGaussian() {
        (when (minusp (star-free d))
 	 (incf (drop-x d) (star-x-inc d))
 	 (incf (drop-y d) (star-y-inc d))
-	 (when (or (> (drop-x d) curses:*cols*) (< (drop-x d) 0)
-		   (> (drop-y d) curses:*lines*) (< (drop-y d) 0))
+	 (when (or (> (drop-x d) (tt-width)) (< (drop-x d) 0)
+		   (> (drop-y d) (tt-height)) (< (drop-y d) 0))
 	   (delete-star sky i))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmethod precipitate ((sky sky))
   (clear-sky sky)
-  (with-curses
-    ;;(init-colors)
-    (curs-set 0)
-    (clear)
-    (with-slots (time-out drops density) sky
-      (let ((last-t-o -1) modeline)
-	(timeout time-out)
-	(loop
-	   ;; create drops
-	   (if (< density 1)
-	       (when (<= (random 1.0) density)
-		 (create-drop sky))
-	       (dotimes (i (ceiling density))
-		 (create-drop sky)))
-	   ;; draw drops
-	   (erase)
-	   (draw-background sky)
-	   (draw-drops sky)
-	   ;; cycle drops
-	   (drop-cycle sky)
-	   (when modeline
-	     (attrset (color-attr +COLOR-WHITE+ +COLOR-BLACK+))
-	     (mvaddstr (1- *lines*) 0 (format nil "~a ~a" density time-out)))
-	   ;; check input
-	   (case (tt-get-char)
-	     ((#\q #\Q) (return))
-	     (#\+ (timeout (decf time-out 1)))
-	     (#\- (timeout (incf time-out 1)))
-	     (#\= (timeout (setf time-out *default-timeout*)))
-	     (#\d (if (> density 1) (incf density) (incf density .1)))
-	     (#\D (if (>= density 2) (decf density) (decf density .1)))
-	     (#\i (incf (sky-param sky)))
-	     (#\I (decf (sky-param sky)))
-	     (#\m (setf modeline (not modeline)))
-	     (#\p (if (= -1 time-out)
-		      (timeout (setf time-out last-t-o))
-		      (progn (setf last-t-o time-out)
-			     (timeout (setf time-out -1))))))))
-      (timeout -1))))
+  (with-new-terminal ()
+    (unwind-protect
+      (progn
+	(tt-cursor-off)
+	(tt-clear)
+	(with-slots (time-out drops density) sky
+	  (let ((last-t-o -1) modeline)
+	    ;;(timeout time-out)
+	    (loop
+	       ;; create drops
+	       (if (< density 1)
+		   (when (<= (random 1.0) density)
+		     (create-drop sky))
+		   (dotimes (i (ceiling density))
+		     (create-drop sky)))
+	       ;; draw drops
+	       (tt-home)
+	       (tt-erase-below)
+	       (draw-background sky)
+	       (draw-drops sky)
+	       ;; cycle drops
+	       (drop-cycle sky)
+	       (when modeline
+		 (tt-color :white :black)
+		 (tt-move-to (1- (tt-height)) 0)
+		 (tt-format "~a ~a ~a" density time-out (type-of *terminal*)))
+	       ;; check input
+	       (tt-finish-output)
+	       (when (or (not time-out)
+			 (tt-listen-for (/ time-out 1000)))
+		 (case (tt-get-char)
+		   ((#\q #\Q) (return))
+		   (#\+ (decf time-out 1))
+		   (#\- (incf time-out 1))
+		   (#\= (setf time-out *default-timeout*))
+		   (#\d (if (> density 1) (incf density) (incf density .1)))
+		   (#\D (if (>= density 2) (decf density) (decf density .1)))
+		   (#\i (incf (sky-param sky)))
+		   (#\I (decf (sky-param sky)))
+		   (#\m (setf modeline (not modeline)))
+		   (#\p (if (not time-out)
+			    (setf time-out last-t-o)
+			    (progn (setf last-t-o time-out)
+				   ;;(timeout (setf time-out -1))
+				   (setf time-out nil))
+			    ))))))))
+      ;;(timeout -1)
+      (tt-cursor-on)
+      (tt-move-to (tt-height) 0)
+      )))
 
 (defun rain (&key (density 0.5))
   (precipitate (make-instance 'rainy :density density)))
@@ -903,24 +946,34 @@ public double nextGaussian() {
   "Rain on your screen."
   (rain :density density))
 
-(defun stars (&key (density 3.0) (color nil))
-  (precipitate (make-instance 'spacey :density density :colorful color)))
+(defun stars (&key (density 3.0) (color nil) (use-unicode t))
+  (precipitate (make-instance 'spacey :density density :colorful color
+			      :use-unicode use-unicode)))
 
 #+lish
 (lish:defcommand stars
-  (("density" float :short-arg #\d :default 3.0)
-   ("color" boolean :short-arg #\c))
+    ((density float :short-arg #\d :default 3.0
+      :help "Density of stars.")
+   (color boolean :short-arg #\c :help "True to make color stars.")
+   (ascii boolean :short-arg #\a :help "True to use ASCII stars."))
   "Fly through the stars."
-  (stars :density density :color color))
+  (stars :density density :color color :use-unicode (not ascii)))
 
-(defun snow (&key (density *default-density*))
-  (precipitate (make-instance 'snowy :density density)))
+(defun snow (&key (density *default-density*) (unicode t))
+  (precipitate (make-instance 'snowy
+			      :density density
+			      :snow-chars
+			      (if unicode
+				  *unicode-snow-chars*
+				  *ascii-snow-chars*))))
 
 #+lish
 (lish:defcommand snow
-  (("density" float :short-arg #\d :default *default-density*))
+  ((density float :short-arg #\d :default *default-density*
+    :help "How dense the snow is, as a floating point number.")
+   (ascii boolean :short-arg #\a :help "True to use ascii snow."))
   "Snow on your screen."
-  (snow :density density))
+  (snow :density density :unicode (not ascii)))
 
 (defun mutrix (&key (density *default-density*))
   (precipitate (make-instance 'mutrix :density density)))

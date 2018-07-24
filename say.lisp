@@ -4,7 +4,7 @@
 
 (defpackage :say
   (:documentation "Have critters say stuff.")
-  (:use :cl :dlib :dlib-misc :char-util :glob :opsys :ppcre :grout)
+  (:use :cl :dlib :dlib-misc :char-util :glob :opsys :ppcre :grout :fatchar)
   (:export
    #:steal-critters
    #:say
@@ -102,10 +102,14 @@
 (defun thoughts (border)
   (aref (get-borders border) 0))
 
-(defun balloon (text width border)
+(defun balloon (text width border no-wrap)
   "Output the ballon with TEXT word justified to WIDTH inside BORDER."
-  (let* ((lines (split-sequence #\newline (justify text width) :omit-empty t))
-	 (max-width (reduce #'max lines :key #'display-length))
+  (let* ((lines (split-sequence #\newline
+				(if no-wrap text (justify text width))
+				:omit-empty t))
+	 (processed-lines (mapcar #'process-ansi-colors
+				  (mapcar #'make-fatchar-string lines)))
+	 (max-width (reduce #'max processed-lines :key #'display-length))
 	 (ba (get-borders border))
 	 ;;(thoughts     (aref ba 0))
 	 (top-left     (aref ba 1))
@@ -200,7 +204,7 @@ VARS. Variables look like: $var or ${var}."
 	(format t "Done.~%"))))
 
 (defun say (text &key (critter :default) (eyes :normal) (border :normal)
-		   tongue (width 40))
+		   tongue (width 40) no-wrap)
   "Have a critter say something."
   (critters)
   (let* ((template (symbol-value
@@ -211,7 +215,7 @@ VARS. Variables look like: $var or ${var}."
 			  (if (member eyes '(:stoned :dead)) eyes :normal)))
 	 (tongue-string (cdr (or (assoc tongue-name *tongues*)
 				 (assoc :normal *tongues*)))))
-    (balloon text width border)
+    (balloon text width border no-wrap)
     (critter template `((eyes     . ,eyes-string)
 			(tongue   . ,tongue-string)
 			(thoughts . ,(thoughts border))))
@@ -232,7 +236,10 @@ VARS. Variables look like: $var or ${var}."
    (tongue choice :short-arg #\t :choices (mapcar #'car *tongues)
     :help "The licky part.")
    (width integer :short-arg #\w :default 40
-    :help "The width of the text in the bubble."))
+    :help "The width of the text in the bubble.")
+   (no-wrap boolean :short-arg #\n
+    :help "True not to wrap the text in the balloon. Useful for preformatted
+text, from something like figet."))
   "Have critters say stuff."
   (when (not text)
     (setf text (slurp *standard-input*)))
@@ -241,6 +248,7 @@ VARS. Variables look like: $var or ${var}."
        :eyes eyes
        :border border
        :tongue tongue
-       :width width))
+       :width width
+       :no-wrap no-wrap))
 
 ;; EOF
