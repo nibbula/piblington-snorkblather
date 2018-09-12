@@ -16,6 +16,6 @@ they are made of, even if they are only a filter for the thoughts of others,
 as are we, and yet perhaps they can aspire to be, however sidgeon-like a peice
 thereof, a conduit for the universal thought."
     :depends-on (:dlib :dlib-misc :char-util :glob :opsys :cl-ppcre :grout
-		 :fatchar)
+		 :fatchar :terminal)
     :components
     ((:file "say")))
