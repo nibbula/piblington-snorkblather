@@ -2,11 +2,9 @@
 ;; robots.lisp - Dumb old robots game
 ;;
 
-;; Copyright © 2012 Nibby Nebbulous
-
 (defpackage :robots
   (:documentation "The dumb old robots game.")
-  (:use :cl :dlib :opsys :curses :char-util :fui :terminal)
+  (:use :cl :dlib :opsys #| :curses |# :char-util :fui :terminal)
   (:export
    ;; Main entry point
    #:robots
@@ -111,8 +109,8 @@ should stop wasting time on this damn thing."
   (with-slots (width height board robots score score-time score-saved level
 	       player zap-charges turn until-danger message god-mode use-color
 	       hide-cursor quit-flag retry-flag) r
-    (setf width (- curses:*cols* 2)
-	  height (- curses:*lines* 4)
+    (setf width (- (tt-width) 2)
+	  height (- (tt-height) 4)
 	  board (make-array `(,width ,height) :initial-element nil)
 	  robots nil
 	  score 0
@@ -174,11 +172,11 @@ should stop wasting time on this damn thing."
 	(loop :for y :from y-start :to y-end :do
 	   (loop :for x :from x-start :to x-end :do
 	      (crash r x y)
-	      (move y x)
-	      (add-char *zap-char*)
+	      (tt-move-to y x)
+	      (tt-write-char *zap-char*)
 	      ;;(mvaddch y x (char-int #\*))
 	      ))
-	(refresh)
+	(tt-finish-output)
 	(sleep .2)
 	(decf zap-charges)))))
 
@@ -213,9 +211,9 @@ should stop wasting time on this damn thing."
 
 (defun message (string)
   "Display a message now."
-  (move (- curses:*lines* 1) 0)
-  (clrtoeol)
-  (addstr string))
+  (tt-move-to (- (tt-height) 1) 0)
+  (tt-erase-to-eol)
+  (tt-write-string string))
 
 (defun player-move (r c)
   "The player's move, with the input character C."
@@ -264,7 +262,7 @@ should stop wasting time on this damn thing."
 		   (tmp-message r "God mode: ~:[OFF~;ON~]" god-mode))
 	      (#\s (show-scores r))
 	      (#\? (help r))
-	      (#.(char-util:ctrl #\L) (clear) (update-screen r))))))) ; redraw
+	      (#.(char-util:ctrl #\L) (tt-clear) (update-screen r))))))) ; redraw
       ;; Valid move check
       (when moved
 	(if (and (>= x 0) (< x width)			; in bounds
@@ -299,17 +297,17 @@ should stop wasting time on this damn thing."
 
 (defun msg (string)
   "Display a message and wait for any character."
-  (message string) (tt-get-char))
+  (message string) (tt-get-key))
 
 (defun ask (string)
   "Ask a yes or no question, with prompt STRING, returning a boolean result."
-  (message string) (addch (char-code #\space))
-  (curs-set 1)
+  (message string) (tt-write-char #\space)
+  (tt-cursor-on)
   (loop :with c
      :do (setf c (tt-get-char))
      (case c
-       ((#\N #\n) (addstr "No.")  (return nil))
-       ((#\Y #\y) (addstr "Yes.") (return t)))))
+       ((#\N #\n) (tt-write-string "No.")  (return nil))
+       ((#\Y #\y) (tt-write-string "Yes.") (return t)))))
 
 (defun get-user ()
   "Return the name of the user."
@@ -317,40 +315,35 @@ should stop wasting time on this damn thing."
 
 (defun show-scores (r &optional (pause t))
   "Show a box with the top scores and pause for input if PAUSE is true."
-  (let ((lines (- curses:*lines* 8)))
-    (macrolet ((with-attr ((a) &body body)
-		 `(progn (attron ,a) ,@body (attroff ,a))))
-      (prog () ; just for muffling
-	 #+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
-	 (setf *high-scores* (sort *high-scores* #'> :key #'score-n)))
-;      (draw-box 3 3 (- curses:*cols* 8) lines)
-      (draw-box 3 3 55 lines)
-      (move 4 4)
-      (addch (char-code #\space))
-      (with-attr (+a-underline+) (addstr (format nil "~10a" "Score")))
-      (addch (char-code #\space))
-      (with-attr (+a-underline+) (addstr (format nil "~20a" "Name")))
-      (addch (char-code #\space))
-      (with-attr (+a-underline+) (addstr (format nil "~19a" "Time")))
-      (addch (char-code #\space))
-      (loop :for i :from 0 :below (- lines 3)
-	 :for s :in *high-scores*
-	 :do
-	 (move (+ 4 1 i) 4)
-	 (addch (char-code #\space))
+  (let ((lines (- (tt-height) 8)))
+    (locally ; just for muffling
+	#+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
+	(setf *high-scores* (sort *high-scores* #'> :key #'score-n)))
+    ;;(draw-box 3 3 (- curses:*cols* 8) lines)
+    (draw-box 3 3 55 lines)
+    (tt-move-to 4 4)
+    (tt-write-span `(#\space
+		     (:underline ,(format nil "~10a" "Score")) #\space
+		     (:underline ,(format nil "~20a" "Name")) #\space
+		     (:underline ,(format nil "~19a" "Time")) #\space))
+    (loop :for i :from 0 :below (- lines 3)
+       :for s :in *high-scores*
+       :do
+	 (tt-move-to (+ 4 1 i) 4)
+	 (tt-write-char #\space)
 	 (when (and (robots-score-time r)
 		    (= (score-time s) (robots-score-time r)))
-	   (attron +a-reverse+))
-	 (addstr (format nil "~10d ~20a ~19a"
-			 (score-n s) (score-name s)
-			 (dlib-misc:date-string :time (score-time s))))
+	   (tt-inverse t))
+	 (tt-format "~10d ~20a ~19a"
+		    (score-n s) (score-name s)
+		    (dlib-misc:date-string :time (score-time s)))
 	 (when (and (robots-score-time r)
 		    (= (score-time s) (robots-score-time r)))
-	   (attroff +a-reverse+))
-	 (addch (char-code #\space)))
-      (refresh)
-      (when pause
-	(tt-get-char)))))
+	   (tt-inverse nil))
+	 (tt-write-char #\space))
+    (tt-finish-output)
+    (when pause
+      (tt-get-key))))
 
 (defvar *score-file* (merge-pathnames ".robots-scores"
 				      (user-homedir-pathname)))
@@ -411,11 +404,11 @@ should stop wasting time on this damn thing."
   (let ((x (1+ (thing-x (robots-player r))))
 	(y (1+ (thing-y (robots-player r)))))
     (loop :for c :across *death-anim* :do
-       (move y x)
-       (add-char c)
+       (tt-move-to y x)
+       (tt-write-char c)
        ;;(mvaddch y x (char-code c))
-       (move y x)
-       (refresh)
+       (tt-move-to y x)
+       (tt-finish-output)
        (sleep .1))))
 
 (defun lose (r)
@@ -496,6 +489,7 @@ should stop wasting time on this damn thing."
       (loop :for n :in del-list :do
 	 (setf robots (delete n robots :key #'thing-id))))))
 
+#|
 (defun draw-box (x y width height)
   "Draw a box at X, Y of WIDTH, HEIGHT."
 ;  (attrset +a-altcharset+)
@@ -516,14 +510,14 @@ should stop wasting time on this damn thing."
 ;    (attrset +a-normal+)
     (attroff +a-altcharset+)
     ))
+|#
 
 (defun draw-status (r)
   "Show the status of the game, like the score and level."
   (with-slots (score level zap-charges) r
-    (move (- curses:*lines* 2) 0)
-    (clrtoeol)
-    (addstr (format nil "Level: ~a Charges: ~a Score: ~a "
-		    level zap-charges score))))
+    (tt-move-to (- (tt-height) 2) 0)
+    (tt-erase-to-eol)
+    (tt-format "Level: ~a Charges: ~a Score: ~a " level zap-charges score)))
 
 (defun draw-board (r)
   "Draw the just board, without anything in it."
@@ -534,7 +528,8 @@ should stop wasting time on this damn thing."
 (defun update-screen (r)
   "Draw the whole screen."
   (with-slots (width height board player use-color hide-cursor message) r
-    (erase)
+    (tt-home)
+    (tt-erase-below)
     (draw-board r)
     (loop :for y :from 0 :below height :do
        (loop :for x :from 0 :below width :do
@@ -542,42 +537,40 @@ should stop wasting time on this damn thing."
 	    (when (and thing (thing-char thing))
 	      (when use-color
 		(case (thing-type thing)
-		  (:robot (attron (color-attr +color-red+ +color-black+)))
-		  (:junk  (attron (color-attr +color-cyan+
-					      (if hide-cursor
-						  +color-black+
-						  +color-blue+))))
-		  (t (attrset 0))))
-	      (move (1+ y) (1+ x))
-	      (add-char (thing-char thing))
+		  (:robot (tt-color :red :black))
+		  (:junk  (tt-color :cyan (if hide-cursor
+					      :black
+					      :blue)))
+		  (t (tt-normal))))
+	      (tt-move-to (1+ y) (1+ x))
+	      (tt-write-char (thing-char thing))
 	      (when use-color
-		(attrset 0))))))
+		(tt-normal))))))
     (when message
       (message message)
       (setf message nil))
     (when hide-cursor
-      (curs-set 0))
-    (move (1+ (thing-y player)) (1+ (thing-x player)))
-    (refresh)))
+      (tt-cursor-off))
+    (tt-move-to (1+ (thing-y player)) (1+ (thing-x player)))
+    (tt-finish-output)))
 
 (defun robots ()
   "Wherein many stupid, but persistent, robots try to kill you."
   (let ((r (make-robots)))
-    (with-curses
-      ;; (init-colors)
+    (with-terminal ()
       (catch 'bye-bye-now
 	(with-slots (quit-flag retry-flag score-saved turn level until-danger
 		     robots hide-cursor) r
-	  (clear)
+	  (tt-clear)
 	  (when hide-cursor
-	    (curs-set 0))
+	    (tt-cursor-off))
 	  (loop :while (not quit-flag) :do
 	     (catch 'retry
 	       (init r)
 	       (update-screen r)
 	       (loop :with c
 		  :while (not (or quit-flag retry-flag)) :do
-		  (setf c (or until-danger (tt-get-char)))
+		  (setf c (or until-danger (tt-get-key)))
 		  (when (player-move r c)
 		    (robots-move r))
 		  (when (zerop (length robots))
@@ -586,7 +579,9 @@ should stop wasting time on this damn thing."
 		  (incf turn)
 		  (update-screen r))
 	       (when (not score-saved)
-		 (save-score r)))))))))
+		 (save-score r))))))
+      (tt-move-to (tt-height) 0)
+      (tt-cursor-on))))
 
 #+lish
 (lish:defcommand robots
