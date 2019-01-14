@@ -4,7 +4,7 @@
 
 (defpackage :robots
   (:documentation "The dumb old robots game.")
-  (:use :cl :dlib :opsys #| :curses |# :char-util :fui :terminal)
+  (:use :cl :dlib :opsys :char-util :fui :terminal :scores)
   (:export
    ;; Main entry point
    #:robots
@@ -22,8 +22,10 @@
   board				; array of things or nil
   robots			; list of working robots
   score
+  score-name			; name that the score was saved with
   score-time			; time when the score was saved
   score-saved			; true if the score was saved
+  scores			; scores class
   level				; incremented for each board cleared
   player			; thing
   zap-charges			; how many times we can zap
@@ -36,9 +38,17 @@
   retry-flag
   quit-flag)
 
-(defstruct score n name time)
+;;(defstruct score n name time)
 
-(defvar *high-scores* nil)
+(defclass robots-score-v2 (score) ())
+(defclass robots-scores (scores)
+  ()
+  (:default-initargs
+   :name "robots"
+   :version 2
+   :magic "RbtS"))
+
+;;(defvar *high-scores* nil)
 (defparameter *zap-range* 2
   "Radius of the sonic screwdriver effect.")
 (defparameter *zap-max* 3
@@ -106,9 +116,9 @@ should stop wasting time on this damn thing."
 
 (defun init (r)
   "Initialize the game."
-  (with-slots (width height board robots score score-time score-saved level
-	       player zap-charges turn until-danger message god-mode use-color
-	       hide-cursor quit-flag retry-flag) r
+  (with-slots (width height board robots score score-time score-saved scores
+	       level player zap-charges turn until-danger message god-mode
+	       use-color hide-cursor quit-flag retry-flag) r
     (setf width (- (tt-width) 2)
 	  height (- (tt-height) 4)
 	  board (make-array `(,width ,height) :initial-element nil)
@@ -116,6 +126,7 @@ should stop wasting time on this damn thing."
 	  score 0
 	  score-time nil
 	  score-saved nil
+	  scores (make-scores 'robots-scores 'robots-score-v2)
 	  level 1
 	  player nil
 	  zap-charges 0
@@ -218,7 +229,7 @@ should stop wasting time on this damn thing."
 (defun player-move (r c)
   "The player's move, with the input character C."
   (with-slots (quit-flag retry-flag player width height board zap-charges
-               until-danger god-mode) r
+               until-danger god-mode scores) r
     (let* ((x (thing-x player)) (old-x x)
 	   (y (thing-y player)) (old-y y)
 	   (used-turn t)
@@ -260,7 +271,7 @@ should stop wasting time on this damn thing."
 	      (#\r (when (ask "Restart?") (setf retry-flag t)))
 	      (#\G (setf god-mode (not god-mode))
 		   (tmp-message r "God mode: ~:[OFF~;ON~]" god-mode))
-	      (#\s (show-scores r))
+	      (#\s (read-scores scores) (show-scores r))
 	      (#\? (help r))
 	      (#.(char-util:ctrl #\L) (tt-clear) (update-screen r))))))) ; redraw
       ;; Valid move check
@@ -309,95 +320,48 @@ should stop wasting time on this damn thing."
        ((#\N #\n) (tt-write-string "No.")  (return nil))
        ((#\Y #\y) (tt-write-string "Yes.") (return t)))))
 
-(defun get-user ()
-  "Return the name of the user."
-  (opsys:user-name))
+(defun show-scores (r &optional (pause-after t))
+  "Show a box with the top scores and pause for input if PAUSE-AFTER is true."
+  (with-slots (scores) r
+    (let ((lines (- (tt-height) 8)))
+      (locally				; just for muffling
+	  #+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
+	  (setf (scores-scores scores)
+		(sort (scores-scores scores) #'> :key #'score-n)))
+      (draw-box 3 3 55 lines)
+      (tt-move-to 4 4)
+      (tt-write-span `(#\space
+		       (:underline ,(format nil "~10a" "Score")) #\space
+		       (:underline ,(format nil "~20a" "Name")) #\space
+		       (:underline ,(format nil "~19a" "Time")) #\space))
+      (loop :for i :from 0 :below (- lines 3)
+	 :for s :in (scores-scores scores)
+	 :do
+	   (tt-move-to (+ 4 1 i) 4)
+	   (tt-write-char #\space)
+	   (when (and (robots-score-time r)
+		      (= (score-time s) (robots-score-time r)))
+	     (tt-inverse t))
+	   (tt-format "~10d ~20a ~19a"
+		      (score-n s) (score-name s)
+		      (dlib-misc:date-string :time (score-time s)))
+	   (when (and (robots-score-time r)
+		      (= (score-time s) (robots-score-time r)))
+	     (tt-inverse nil))
+	   (tt-write-char #\space))
+      (tt-finish-output)
+      (when pause-after
+	(tt-get-key)))))
 
-(defun show-scores (r &optional (pause t))
-  "Show a box with the top scores and pause for input if PAUSE is true."
-  (let ((lines (- (tt-height) 8)))
-    (locally ; just for muffling
-	#+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
-	(setf *high-scores* (sort *high-scores* #'> :key #'score-n)))
-    ;;(draw-box 3 3 (- curses:*cols* 8) lines)
-    (draw-box 3 3 55 lines)
-    (tt-move-to 4 4)
-    (tt-write-span `(#\space
-		     (:underline ,(format nil "~10a" "Score")) #\space
-		     (:underline ,(format nil "~20a" "Name")) #\space
-		     (:underline ,(format nil "~19a" "Time")) #\space))
-    (loop :for i :from 0 :below (- lines 3)
-       :for s :in *high-scores*
-       :do
-	 (tt-move-to (+ 4 1 i) 4)
-	 (tt-write-char #\space)
-	 (when (and (robots-score-time r)
-		    (= (score-time s) (robots-score-time r)))
-	   (tt-inverse t))
-	 (tt-format "~10d ~20a ~19a"
-		    (score-n s) (score-name s)
-		    (dlib-misc:date-string :time (score-time s)))
-	 (when (and (robots-score-time r)
-		    (= (score-time s) (robots-score-time r)))
-	   (tt-inverse nil))
-	 (tt-write-char #\space))
-    (tt-finish-output)
-    (when pause
-      (tt-get-key))))
-
-(defvar *score-file* (merge-pathnames ".robots-scores"
-				      (user-homedir-pathname)))
-(defvar *lock-file* (merge-pathnames ".robots-scores-lock"
-				      (user-homedir-pathname)))
-
-(define-constant +score-version+ 1
-  "Format version of the score file.")
-
-(define-constant +score-magic+ "RbtS"
-  "Magic number of the score file, soes youse knows what it is.")
-
-(defgeneric read-score-version (r vers stream))
-(defmethod read-score-version ((r robots) (vers (eql 1)) stream)
-  (setf *high-scores* nil)
-  (loop :with s = nil
-     :while (setf s (read stream nil nil))
-     :do (push s *high-scores*)))
-
-(defgeneric write-score-version (r vers stream))
-(defmethod write-score-version ((r robots) (vers (eql 1)) stream)
-  (format stream "~a ~w~%" +score-magic+ +score-version+)
-  (loop :for s :in *high-scores*
-     :do (format stream "~w~%" s)))
-
-(defun read-scores (r)
-  (with-open-file (stream *score-file* :direction :input
-			  :if-does-not-exist nil)
-    (when stream
-      (let ((*read-eval* nil)
-	    (magic (make-string (length +score-magic+)))
-	    version)
-	(when (or (/= (read-sequence magic stream) (length +score-magic+))
-		  (string/= magic +score-magic+))
-	  (error "Bad magic number in score file."))
-	(setf version (read stream))
-	(when (/= version +score-version+)
-	  (error "The score version is too new?"))
-	(read-score-version r version stream)))))
-
-(defun save-score (r &key (pause t))
-  (with-slots (score score-saved) r
+(defun save-the-score (r &key (pause t))
+  (with-slots (score score-saved scores score-name score-time) r
     (when (> score 0)
-      (with-locked-file (*score-file*)
-	(read-scores r)
-	(setf (robots-score-time r) (get-universal-time))
-	(push (make-score :n score :name (get-user) :time (robots-score-time r))
-	      *high-scores*)
-	(with-open-file (stm *score-file* :direction :output
-			     :if-exists :overwrite
-			     :if-does-not-exist :create)
-	  (write-score-version r +score-version+ stm)))
-      (setf score-saved t)
-      (show-scores r pause))))
+      (let ((the-score (make-instance 'robots-score-v2 :n score)))
+	(save-score scores the-score)
+	(setf score-name (score-name the-score)
+	      score-time (score-time the-score))
+	(setf score-saved t)
+	(show-scores r pause)))))
 
 (defun death (r)
   "Show the death animation."
@@ -416,7 +380,7 @@ should stop wasting time on this damn thing."
   (when (robots-god-mode r)
     (return-from lose nil))
   (death r)
-  (save-score r :pause nil)
+  (save-the-score r :pause nil)
   (if (ask "You died. Try again?")
       (progn
 	(setf (robots-retry-flag r) t)
@@ -489,29 +453,6 @@ should stop wasting time on this damn thing."
       (loop :for n :in del-list :do
 	 (setf robots (delete n robots :key #'thing-id))))))
 
-#|
-(defun draw-box (x y width height)
-  "Draw a box at X, Y of WIDTH, HEIGHT."
-;  (attrset +a-altcharset+)
-  (attron +a-altcharset+)
-  (let ((iwidth (max 0 (- width 2))))
-    (mvaddch y x (acs-ulcorner)) 
-    (loop :for i :from 0 :below iwidth
-       :do (addch (acs-hline)))
-    (addch (acs-urcorner))
-    (loop :for i :from 1 :below (1- height)
-       :do
-       (mvaddch (+ y i) x (acs-vline))
-       (mvaddch (+ y i) (+ x (1- width)) (acs-vline)))
-    (mvaddch (+ y (- height 1)) x (acs-llcorner))
-    (loop :for i :from 0 :below iwidth
-       :do (addch (acs-hline)))
-    (addch (acs-lrcorner))
-;    (attrset +a-normal+)
-    (attroff +a-altcharset+)
-    ))
-|#
-
 (defun draw-status (r)
   "Show the status of the game, like the score and level."
   (with-slots (score level zap-charges) r
@@ -579,7 +520,7 @@ should stop wasting time on this damn thing."
 		  (incf turn)
 		  (update-screen r))
 	       (when (not score-saved)
-		 (save-score r))))))
+		 (save-the-score r))))))
       (tt-move-to (tt-height) 0)
       (tt-cursor-on))))
 

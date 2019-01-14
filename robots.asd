@@ -12,6 +12,6 @@
     :long-description
     "Robots try to get you. You make them crash into each other.
 Mostly just to test your tmux window."
-    :depends-on (:dlib :opsys :curses :char-util :fui)
+    :depends-on (:dlib :opsys :char-util :fui :terminal :scores)
     :components
     ((:file "robots")))
