@@ -10,6 +10,7 @@
     :license            "GPLv3"
     :source-control	:git
     :long-description   "Waste your time."
-    :depends-on (:dlib :terminal :inator :terminal-inator :fui :fatchar :keymap)
+    :depends-on (:dlib :terminal :inator :terminal-inator :fui :fatchar :keymap
+		 :scores)
     :components
     ((:file "tetris")))
