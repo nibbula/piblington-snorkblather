@@ -190,6 +190,7 @@
     (#\z      . toggle-debug)
     ;;(#\s      . show-tetris-scores)
     (#\s      . pause-game)
+    (#\n      . new-game)
     (#\q      . quit)
     (#\escape . quit)))
 
@@ -278,7 +279,10 @@
     :documentation "True when the game is over.")
    (debug-flag
     :initarg :debug-flag :accessor debug-flag :initform nil :type boolean
-    :documentation "True to do debugging things."))
+    :documentation "True to do debugging things.")
+   (high-color
+    :initarg :high-color :accessor high-color :initform nil :type boolean
+    :documentation "True to use lots of colors."))
   (:default-initargs
    :keymap `(,*tetris-keymap* ,*default-inator-keymap*))
   (:documentation "State of the game."))
@@ -497,6 +501,14 @@
     (setf (inator-quit-flag o) t))
   (setf (paused o) nil))
 
+(defmethod new-game ((o tetris))
+  "Restart the game."
+  (setf (paused o) t)
+  (update-display o)
+  (when (confirm "Really?" '("Restart the game? (y / n)"))
+    (restart-game))
+  (setf (paused o) nil))
+
 (defun draw-piece (piece &key (x 0) (y 0))
   (let ((p (piece-bits piece)))
     (loop :for py :from 0 :below 4 :do
@@ -518,7 +530,7 @@
   "Show a box with the top scores and pause for input if PAUSE-AFTER is true."
   (with-slots (scores) o
     (let ((lines (- (tt-height) 2))
-	  (left (+ *board-left* (* 12 *block-width*)))
+	  (left (+ *board-left* (* 12 *block-width*) 1))
 	  (top 0))
       (locally				; just for muffling
 	  #+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
@@ -571,29 +583,66 @@
       (t
        (move-down o)))))
 
+(defun set-bg-fill (x width)
+  (let ((color
+	 (- 1 (+ .434 (/ (* x .376) width)))))
+    (tt-color :black
+	      (vector :rgb
+		      (max 0 (- color .3))
+		      0
+		      (max 0 (- 1 color .4))))))
+
 (defmethod update-display ((o tetris))
-  (with-slots (board score next current paused width height level debug-flag) o
+  (with-slots (board score next current paused width height level debug-flag
+	       high-color) o
     (tt-home)
     (tt-erase-below)
     (tt-color :red :default)
     (tt-write-string-at 0 2 "TETЯIS")
 
     ;; Write borders and board contents.
-    (loop :with c
-      :for y :from 0 :below height :do
-      (tt-color :black :white)
-      (tt-write-string-at y *board-left* "[]")
-      (loop :for x :from 0 :below width :do
-	(setf c (if (and paused (not debug-flag))
-		    *paused-char*
-		    (aref *piece-char* (aref (board o) y x))))
-        (tt-write-char-at y (+ *board-left* *block-width* (* x *block-width*)) c)
-	(tt-write-char c)
-	(tt-color :black :white)
-	(tt-write-string "[]")))
-    (tt-move-to height *board-left*)
+    (loop :with c :and grey :and style
+       :for y :from 0 :below height :do
+	 (tt-color :white :black)
+	 (tt-write-char-at y (1- *board-left*) #\<)
+	 (if high-color
+	     (progn
+	       (setf grey (- #xff (+ #x80 (truncate (/ (* y #x60) height)))))
+	       (tt-color :black (vector :rgb8 grey grey grey)))
+	     (tt-color :black :white))
+	 (tt-write-string-at y *board-left* "[]")
+	 (loop :for x :from 0 :below width
+	      :for x1 :from 0 :below (* width 2) :by 2
+	    :do
+              (setf style (aref (board o) y x))
+	      (setf c
+		    (cond
+		      ((and paused (not debug-flag)) *paused-char*)
+		      ((and high-color (zerop style))
+		       (set-bg-fill x1 (* width 2))
+		       #\space)
+		      (t
+		       (aref *piece-char* style))))
+              (tt-write-char-at y (+ *board-left* *block-width*
+				     (* x *block-width*)) c)
+	      (set-bg-fill (1+ x1) (* width 2))
+	      (tt-write-char c))
+	 (if high-color
+	     (tt-color :black (vector :rgb8 grey grey grey))
+	     (tt-color :black :white))
+	 (tt-write-string "[]")
+	 (tt-color :white :black)
+	 (tt-write-char #\>))
+    (tt-move-to height (1- *board-left*))
+    (tt-write-char #\<)
+    (tt-color :black :white)
     (dotimes (i (+ width *block-width*))
       (tt-write-string "[]"))
+    (tt-color :white :black)
+    (tt-write-char #\>)
+    (tt-move-to (1+ height) *board-left*)
+    (dotimes (i (+ width *block-width*))
+      (tt-write-string "\\/"))
 
     ;; Score
     (tt-color :white :default)
@@ -618,7 +667,8 @@
 		       ("<right> / l" . "Move right")
 		       ("space"       . "Drop piece")
 		       ("p / s"       . "Pause / Show scores")
-		       ("o"           . "Options"))
+		       ("o"           . "Options")
+		       ("n"           . "New Game"))
 	 :for i :from 0
        :do
 	 (tt-write-string-at (+ 13 i) 41 (car k))
@@ -656,14 +706,14 @@
       :until (member c '(#\y #\n) :test #'char-equal)
       :finally (return c))))
 
-(defun tetris ()
+(defun tetris (&key high-color)
   "Play Tetris."
   (if (< (tt-height) 20)
       (fui:display-text "Called off!"
        '("I'm sorry, but your terminal doesn't have enough lines to play
           Tetris properly. Try making your window at least 20 lines high."))
       (with-terminal ()
-	(let ((*tetris* (make-instance 'tetris)))
+	(let ((*tetris* (make-instance 'tetris :high-color high-color)))
 	  (setf (tt-input-mode) :char)
 	  (tt-clear)
 	  (unwind-protect
@@ -692,9 +742,10 @@
 	    (tt-cursor-on))))))
 
 #+lish
-(lish:defcommand tetris ()
+(lish:defcommand tetris
+  ((high-color boolean :short-arg #\c :help "True to use lots of colors."))
   "Zone out with a certain gang of blocks."
   (catch nil
-    (tetris)))
+    (tetris :high-color high-color)))
 
 ;; EOF
