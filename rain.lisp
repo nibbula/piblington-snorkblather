@@ -4,7 +4,7 @@
 
 ;; This is like the old thing from a VAX or something.
 
-;(declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
+;;(declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 (declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
 ;(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 
@@ -36,11 +36,11 @@
     :initform *default-density* :type single-float
     :documentation "Density of drops.")
    (param
-    :initarg :parm :accessor sky-param :initform 0
+    :initarg :param :accessor sky-param :initform 0
     :documentation "A numeric parameter.")
    (time-out
     :initarg :time-out :accessor time-out
-    :initform *default-timeout* :type fixnum
+    :initform *default-timeout* #| :type fixnum |#
     :documentation "Time for timer."))
   (:documentation "The roof of the world."))
 
@@ -51,8 +51,18 @@
   (:documentation "Draw the background of the sky.")
   (:method ((sky sky)) (declare (ignore sky))))
 
+(defgeneric frame-end (sky)
+  (:documentation "Do something after the a frame is drawn.")
+  (:method ((sky sky)) (declare (ignore sky))))
+
 (defgeneric drop-cycle (sky)
   (:documentation "Cycle the drops in the sky."))
+
+(defgeneric resize-sky (sky)
+  (:documentation "The sky was resized.")
+  (:method ((sky sky))
+    (tt-clear)
+    (terminal-get-size *terminal*)))
 
 (defgeneric clear-sky (sky)
   (:documentation "Clear the sky.")
@@ -204,6 +214,12 @@ public double nextGaussian() {
 	      *last-one* (* x2 w)
 	      *has-last-one* t)
 	(the double-float y1))))
+
+(defmacro with-slow-normal-dist (() &body body)
+  "Wrap around calls of normal-distribution-1 to be thread “safe”."
+  `(let ((*last-one* 0d0)
+	 (*has-last-one* nil))
+     ,@body))
 
 ;; Stolen from:
 ;; https://github.com/tpapp/cl-random/blob/master/src/univariate.lisp
@@ -883,15 +899,102 @@ public double nextGaussian() {
 	   (delete-star sky i))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Fire
+
+(defclass fire (sky)
+  ((wind
+    :initarg :wind :accessor fire-wind :initform 0 :type fixnum
+    :documentation "Amount of wind.")
+   (wind-counter
+    :initarg :wind-counter :accessor fire-wind-counter :initform 0 :type fixnum
+    :documentation "Countdown until the wind stops."))
+  (:default-initargs :param 12)
+  (:documentation "Your terminal is on fire."))
+
+(defclass flame (drop)
+  ((heat
+    :initarg :heat :accessor flame-heat :initform 1f0 :type float
+    :documentation "How hot is it, between 1 and 0."))
+  (:documentation "A bit of flame."))
+
+(defmethod create-drop ((sky fire))
+  (declare (ignore sky))
+  #| Don't create random flames based on density. |#
+  )
+
+(defun flame-color (n)
+  "Return the color given the heat."
+  (vector :rgb (if (> n 0) 1.0 0.0) (min n 1.0) (* pi (max 0.0 (- n .8)))))
+
+(defmethod draw-drop ((sky fire) (drop flame))
+  (with-slots (x y heat) drop
+    (tt-color :black (flame-color heat))
+    (when (< -1 x (tt-width))
+      (when (not (and (= y (1- (tt-height)))
+		      (= x (1- (tt-width)))))
+	(tt-write-char-at y x #\space)))))
+
+(defmethod drop-cycle ((sky fire))
+  (with-slots (wind wind-counter) sky
+    ;; @@@ This wind is crap. We could use much better wind.
+    ;; Like with sine undulation and logarithmic decay.
+    #|
+    (if (zerop wind-counter)
+	(when (zerop (random 40))
+	  (setf wind (- (random 10) 5)
+		wind-counter (+ 10 (random 10))))
+	(progn
+	  (decf wind-counter)
+	  (when (not (zerop wind))
+	    (setf wind (+ wind (* -1 (signum wind)))))))
+    |#
+    (loop :with r
+       :for d :in (copy-list (drops sky)) :do
+       (decf (drop-y d))
+       (setf r (random 100))
+       ;; (incf (drop-x d) (cond ((< r 5) -2)
+       ;; 			    ((< 5 r 20) 1)
+       ;; 			    ((< 10 r 90) 0)
+       ;; 			    ((< 80 r 95) 1)
+       ;; 			    ((> 5) 2)))
+       (incf (drop-x d) (+ (1- (random 3)) wind))
+       (decf (flame-heat d) (random (* .01 (max 0.1 (sky-param sky)))))
+       ;; (decf (flame-heat d) (* .01 (max 0.1 (sky-param sky))))
+       (when (or (<= (drop-y d) 0)
+		 (< (flame-heat d) 0.0))
+	 (setf (drops sky) (delete d (drops sky)))))))
+
+(defmethod frame-end ((sky fire))
+  (with-slots (density) sky
+    (loop :for x :from 0 :below (tt-width)
+       :do
+       (push (make-instance 'flame
+			    :x x
+			    :y (1- (tt-height))
+			    :heat (+ .8 (random 0.2))) (drops sky))
+       (push (make-instance 'flame
+			    :x x
+			    :y (- (tt-height) (random 4))
+			    :heat (+ .5 (random 0.5))) (drops sky))
+       (when (> density 1)
+	 (dotimes (i (ceiling (* density .12)))
+	   (push (make-instance 'flame
+				:x x
+				:y (- (tt-height) (random 4))
+				:heat (+ .5 (random 0.5))) (drops sky)))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmethod precipitate ((sky sky))
   (clear-sky sky)
-  (with-new-terminal ()
+  ;; (with-new-terminal ()
+  (with-terminal ()
     (unwind-protect
       (progn
 	(tt-cursor-off)
 	(tt-clear)
-	(with-slots (time-out drops density) sky
+	(tt-enable-events :resize)
+	(with-slots (time-out drops density param) sky
 	  (let ((last-t-o -1) modeline)
 	    ;;(timeout time-out)
 	    (loop
@@ -908,16 +1011,20 @@ public double nextGaussian() {
 	       (draw-drops sky)
 	       ;; cycle drops
 	       (drop-cycle sky)
+	       (frame-end sky)
 	       (when modeline
 		 (tt-color :white :black)
 		 (tt-move-to (1- (tt-height)) 0)
-		 (tt-format "~a ~a ~a" density time-out (type-of *terminal*)))
+		 (tt-format "~a ~a ~a ~a"
+			    density time-out param (type-of *terminal*)))
 	       ;; check input
 	       (tt-finish-output)
 	       (when (or (not time-out)
 			 (tt-listen-for (/ time-out 1000)))
-		 (case (tt-get-char)
+		 (case (tt-get-key)
 		   ((#\q #\Q) (return))
+		   (:resize (resize-sky sky))
+		   (#\page (resize-sky sky))
 		   (#\+ (decf time-out 1))
 		   (#\- (incf time-out 1))
 		   (#\= (setf time-out *default-timeout*))
@@ -980,8 +1087,17 @@ public double nextGaussian() {
 
 #+lish
 (lish:defcommand mutrix
-  (("density" float :short-arg #\d :default *default-density*))
+  ((density float :short-arg #\d :default *default-density*))
   "Peer into the Mutrix."
   (mutrix :density density))
+
+(defun fire (&key (density 10f0))
+  (precipitate (make-instance 'fire :density density :time-out 20)))
+
+#+lish
+(lish:defcommand fire
+  ((density float :short-arg #\d :default 10f0))
+  "Set your terminal on fire."
+  (fire :density density))
 
 ;; EOF
