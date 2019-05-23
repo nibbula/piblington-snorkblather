@@ -75,6 +75,7 @@
     :help "Files to concatencolorate.")
    (frequency number :short-arg #\F :default 0.3 :help "Rainnow frequency.")
    (spread number :short-arg #\p :default 8 :help "Rainnow spread."))
+  :accepts (:grotty-stream)
   "Cats of many colors!!"
   (lolcat :files files :frequency frequency :spread spread))
 
