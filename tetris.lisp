@@ -4,8 +4,8 @@
 
 (defpackage :tetris
   (:documentation "Waste your time.")
-  (:use :cl :dlib :terminal :inator :terminal-inator :fatchar :keymap
-	:scores)
+  (:use :cl :dlib :dlib-misc :terminal :inator :terminal-inator :fatchar :keymap
+	:scores :collections)
   (:export
    #:tetris
    ))
@@ -31,6 +31,8 @@
 ;; play this game, in whatever form they deem fit, in perpetuity, for all
 ;; eternity, or as long as they see fit to do so, and without any charge or
 ;; obligation whatsoever.
+
+(declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 
 (defparameter +blank+ 0)
 (defparameter +T+ 1)
@@ -114,15 +116,45 @@
 	       (aref (aref bits i) j))))
     result))
 
+(defun trim-piece (piece)
+  ;; Trim vertically
+  (let* ((new-piece (remove-if (_ (every #'zerop _)) piece))
+	 (keep-cols
+	  (loop :for x :from 0 :below (length (aref new-piece 0))
+	     :if (some (_ (plusp (aref _ x))) piece)
+	     :collect x)))
+    (setf new-piece
+	  (make-array
+	   (length new-piece)
+	   :element-type 'bit-vector
+	   :initial-contents
+	   (loop :for y :from 0 :below (length new-piece)
+	      :collect
+		(make-array
+		 (length keep-cols) :element-type 'bit
+		 :initial-contents
+		 (loop :for c :in keep-cols
+		    :collect (aref (aref new-piece y) c))))))
+    new-piece))
+
 (defun make-pieces ()
   "Make the rotations of the pieces."
   (let ((result (make-array 7)))
+    ;; Make the rotations.
     (loop :for p :from 0 :below 7 :do
       (loop :with pp = (setf (aref result p) (make-array 4))
 	 :for rot :from 0 :below 4 :do
-         (setf (aref pp rot) (if (zerop rot)
-				 (copy-seq (aref *base-pieces* p))
-				 (rotate-bits (aref pp (1- rot)))))))
+	   ;;(format t "rot ~s ~s~%" p rot)
+           (setf (aref pp rot)
+		  (if (zerop rot)
+		      (copy-seq (aref *base-pieces* p))
+		      (rotate-bits (aref pp (1- rot)))))))
+    ;; Trim pieces
+    (loop :for p :from 0 :below 7 :do
+      (loop :with pp = (aref result p)
+	 :for rot :from 0 :below 4 :do
+	   ;;(format t "trim ~s ~s~%" p rot)
+	   (setf (aref pp rot) (trim-piece (aref pp rot)))))
     result))
 
 (defparameter *piece* (make-pieces)
@@ -135,7 +167,7 @@
   (orientation 0 :type fixnum)	; 0 - 3 index into *piece*.
   (style       0 :type fixnum)) ; The piece number, an index 1 - 7 in *piece*.
 
-(defparameter *piece-char*
+(defparameter *low-color-piece-char*
   (make-array 8 :element-type 'fatchar
 	      :initial-contents
 	      `(,(make-fatchar :c #\space)
@@ -172,6 +204,29 @@
 		 ,(make-fatchar :bg :blue    :fg :cyan    :c #\space)   ; O
 		 ,(make-fatchar :bg :red     :fg :yellow  :c #\space)))) ; I
 
+(defparameter *high-color-piece-char*
+  (make-array
+   8 :element-type 'fatchar
+   :initial-contents
+   `(,(make-fatchar :c #\space)
+      ;; ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\◙)  ; T
+      ;; ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\☐)  ; L
+      ;; ,(make-fatchar :bg :magenta         :fg #(:rgb .8  0 .8) :c #\☐)  ; J
+      ;; ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\■)  ; S
+      ;; ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .8 .8) :c #\❖)  ; Z
+      ;; ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
+      ;; ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\♥) ; I
+      ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\┼)  ; T
+      ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\╱)  ; L
+      ,(make-fatchar :bg :magenta         :fg #(:rgb .7  0 .7) :c #\╲)  ; J
+      ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\o)  ; S
+      ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .7 .7) :c #\*)  ; Z
+      ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
+      ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\│) ; I
+      )))
+
+(defparameter *piece-char* *low-color-piece-char*)
+
 (defkeymap *tetris-keymap*
   `((:up      . rotate-right)
     (#\f      . rotate-right)
@@ -188,22 +243,23 @@
     (#\space  . drop)
     (#\p      . pause-game)
     (#\z      . toggle-debug)
-    ;;(#\s      . show-tetris-scores)
-    (#\s      . pause-game)
+    (#\s      . show-tetris-scores)
     (#\n      . new-game)
     (#\q      . quit)
     (#\escape . quit)))
 
 (defun level-rate (level)
   "Return the fall rate based on the level."
-  (cond
-    ((< level 10) (aref #(4/5 43/60 19/30 11/20 7/15 23/60 3/10 13/60 2/15 1/10)
-			level))
-    ((< level 13) 1/12)
-    ((< level 15) 1/15)
-    ((< level 18) 1/20)
-    ((< level 28) 1/30)
-    (t 1/60)))
+  (make-dtime-as
+   (cond
+     ((< level 10) (aref #(4/5 43/60 19/30 11/20 7/15 23/60 3/10 13/60 2/15 1/10)
+			 level))
+     ((< level 13) 1/12)
+     ((< level 15) 1/15)
+     ((< level 18) 1/20)
+     ((< level 28) 1/30)
+     (t 1/60))
+   :seconds))
 
 (defun lines-level (lines)
   "Return the level for number of lines cleared."
@@ -218,7 +274,7 @@
 (defparameter *block-width* 2
   "Width of a sub-block in characters.")
 
-(defparameter *paused-char* (make-fatchar :c #\X)
+(defparameter *paused-char* (make-fatchar :c #\X :fg :green :bg :black)
   "Fatchar to fill the screen with when paused.")
 
 (defparameter *zap-char* (make-fatchar :c #\* :fg :yellow)
@@ -243,8 +299,11 @@
     :initarg :height :accessor tetris-height :initform 20 :type fixnum
     :documentation "Height in blocks.")
    (rate
-    :initarg :rate :accessor rate :initform (level-rate 0) :type number
+    :initarg :rate :accessor rate :initform (level-rate 0) :type dtime
     :documentation "Rate a which blocks fall.")
+   (drop-start
+    :initarg :drop-start :accessor drop-start
+    :documentation "Starting time of the block dropping.")
    (current
     :initarg :current :accessor current :initform nil :type (or null piece)
     :documentation "The active block.")
@@ -282,7 +341,10 @@
     :documentation "True to do debugging things.")
    (high-color
     :initarg :high-color :accessor high-color :initform nil :type boolean
-    :documentation "True to use lots of colors."))
+    :documentation "True to use lots of colors.")
+   (plain
+    :initarg :plain :accessor tetris-plain :initform nil :type boolean
+    :documentation "True to use plain characters."))
   (:default-initargs
    :keymap `(,*tetris-keymap* ,*default-inator-keymap*))
   (:documentation "State of the game."))
@@ -295,9 +357,10 @@
 
 (defun load-piece (o)
   "Make the next piece be the current, and make a new "
-  (with-slots (current next) o
+  (with-slots (current next drop-start) o
     (setf current (or next (make-piece :style (random-style)))
-	  next (make-piece :style (random-style)))))
+	  next (make-piece :style (random-style))
+	  drop-start (get-dtime))))
 
 (defun initialize-board (o)
   (with-slots (width height) o
@@ -321,36 +384,54 @@
   (with-slots (board width height debug-flag game-over) *tetris*
     (let ((p (piece-bits piece))
 	  bx by)
-      (loop :for y :from 0 :below 4 :do
-        (loop :for x :from 0 :below 4 :do
+      (loop :for y :from 0 :below (length p) :do
+        (loop :for x :from 0 :below (length (aref p y)) :do
 	  (setf bx (+ (piece-x piece) x)
 		by (+ (piece-y piece) y))
           (when (plusp (aref (aref p y) x))
 	    (cond
 	      ((< (+ (piece-x piece) x) 0)
 	       ;; Hit the left wall
-	       (return-from collision-p t))
+	       (return-from collision-p :left))
 	      ((>= (+ (piece-x piece) x) width)
 	       ;; Hit the right wall
-	       (return-from collision-p t))
+	       (return-from collision-p :right))
 	      ((>= (+ (piece-y piece) y) height)
 	       ;; Hit the bottom
-	       (return-from collision-p t))
+	       (return-from collision-p :bottom))
 	      ((and (>= bx 0) (>= by 0)
 		    (plusp (aref board by bx)))
 	       ;; Hit something
 	       (when (and game-over-check (= 1 (piece-y piece)))
 		 (setf game-over t
 		       (inator-quit-flag *tetris*) t))
-	       (return-from collision-p t)))))))))
+	       (return-from collision-p :board)))))))))
+
+(defun check-rotate-collision (o saved-orientation)
+  (with-slots (current) o
+    (let ((type (collision-p current :game-over-check nil)))
+      (dbugf :tet "WALL ??? ~s~%" type)
+      (case type
+	((nil) #| good |#)
+	(:right
+	 (dbugf :tet "WALL KICK~%")
+	 ;; Wall kick
+	 ;; @@@ This still isn't right. It can mess you up in tight spots.
+	 (let ((saved-x (piece-x current)))
+	   (setf (piece-x current)
+		 (- *board-left* (length (aref (piece-bits current) 0)) 3))
+	   (when (collision-p current :game-over-check nil)
+	     (setf (piece-x current) saved-x
+		   (piece-orientation current) saved-orientation))))
+	(otherwise
+	 (setf (piece-orientation current) saved-orientation))))))
 
 (defun rotate-right (o)
   (with-slots (current) o
     (let ((saved-orientation (piece-orientation current)))
       (setf (piece-orientation current)
 	    (mod (1+ (piece-orientation current)) 4))
-      (when (collision-p current :game-over-check nil)
-	(setf (piece-orientation current) saved-orientation)))))
+      (check-rotate-collision o saved-orientation))))
 
 (defun rotate-left (o)
   (with-slots (current) o
@@ -358,8 +439,7 @@
       (decf (piece-orientation current))
       (when (minusp (piece-orientation current))
 	(setf (piece-orientation current) 3))
-      (when (collision-p current :game-over-check nil)
-	(setf (piece-orientation current) saved-orientation)))))
+      (check-rotate-collision o saved-orientation))))
 
 (defun zap-line (o line char)
   "Animate filling a line with CHAR."
@@ -423,8 +503,8 @@
   "Make the block land and become part of the board. Also load the next piece."
   (with-slots (board current next width score down-count) *tetris*
     (let ((p (piece-bits piece)))
-      (loop :for y :from 0 :below 4 :do
-        (loop :for x :from 0 :below 4 :do
+      (loop :for y :from 0 :below (length p) :do
+        (loop :for x :from 0 :below (length (aref p y)) :do
           (when (and (plusp (aref (aref p y) x))
 		     (>= (+ (piece-x piece) x) 0)
 		     (< (+ (piece-x piece) x) width))
@@ -487,7 +567,7 @@
   "Pause the game."
   (setf (paused o) t)
   (update-display o)
-  (show-tetris-scores o)
+  (tt-get-key)
   (setf (paused o) nil))
 
 (defun toggle-debug (o)
@@ -497,7 +577,7 @@
   "Quit the game."
   (setf (paused o) t)
   (update-display o)
-  (when (confirm "Really?" '("Really quit? (y / n)"))
+  (when (confirm-box "Really?" '("Really quit? (y / n)"))
     (setf (inator-quit-flag o) t))
   (setf (paused o) nil))
 
@@ -505,43 +585,78 @@
   "Restart the game."
   (setf (paused o) t)
   (update-display o)
-  (when (confirm "Really?" '("Restart the game? (y / n)"))
+  (when (confirm-box "Really?" '("Restart the game? (y / n)"))
     (restart-game))
   (setf (paused o) nil))
 
-(defun draw-piece (piece &key (x 0) (y 0))
+(defun draw-piece (piece &key (x 0) (y 0) bg)
   (let ((p (piece-bits piece)))
-    (loop :for py :from 0 :below 4 :do
+    ;; (dbugf :tet "p = ~s~%" p)
+    (loop :for py :from 0 :below (length p) :do
       (loop :with c
-        :for px :from 0 :below 4 :do
-        (when (plusp (aref (aref p py) px))
-	  (setf c (aref *piece-char* (piece-style piece)))
-	  (tt-write-char-at (+ (piece-y piece) y py)
-			    (+ (* (piece-x piece) *block-width*)
-			       x (* px *block-width*)) c)
-	  (tt-write-char c))))))
+        :for px :from 0 :below (length (aref p py)) :do
+           (if (plusp (aref (aref p py) px))
+	       (progn
+		 (setf c (aref *piece-char* (piece-style piece)))
+		 (tt-write-char-at (+ (piece-y piece) y py)
+				   (+ (* (piece-x piece) *block-width*)
+				      x (* px *block-width*)) c)
+		 (tt-write-char c))
+	       (when bg
+		 (setf c bg)
+		 (tt-write-char-at (+ (piece-y piece) y py)
+				   (+ (* (piece-x piece) *block-width*)
+				      x (* px *block-width*)) c)))))))
+
+(defun draw-all-pieces ()
+  (with-terminal ()
+    (tt-home)
+    (tt-erase-below)
+    (loop :with y = 0 :and bits
+       :for style :from 1 :to 7 :do
+	 (loop :with x = 0 :and p
+	    :for rot :from 0 :below 4 :do
+	      (setf p (make-piece :x x :y y :orientation rot :style style)
+		    bits (piece-bits p))
+	      (draw-piece p :bg #\.)
+	      (incf x (1+ (length (aref bits 0)))))
+	 (incf y (1+ (length bits))))
+    (tt-get-key)))
 
 (defun show-tetris-scores (o &optional (pause-after t))
   (with-slots (scores) o
+    (setf (paused o) t)
+    (update-display o)
     (read-scores scores)
-    (show-scores o pause-after)))
+    (show-scores o pause-after)
+    (setf (paused o) nil)))
+
+(defun our-score-p (o score)
+  "Return true if SCORE is our score."
+  (and (not (zerop (tetris-score-time o)))
+       (= (score-time score) (tetris-score-time o))))
 
 (defun show-scores (o &optional (pause-after t))
   "Show a box with the top scores and pause for input if PAUSE-AFTER is true."
-  (with-slots (scores) o
+  (with-slots (scores plain) o
     (let ((lines (- (tt-height) 2))
 	  (left (+ *board-left* (* 12 *block-width*) 1))
-	  (top 0))
+	  (top 0)
+	  line)
       (locally				; just for muffling
 	  #+sbcl (declare (sb-ext:muffle-conditions sb-ext:compiler-note))
 	  (setf (scores-scores scores)
 		(sort (scores-scores scores) #'> :key #'score-n)))
-      (fui:draw-box left top (- (tt-width) left 1) lines)
+      (fui:draw-box left top (- (tt-width) left 1) lines #|:plain plain|#)
       (tt-move-to (+ top 1) (1+ left))
-      (tt-write-span `(#\space
-		       (:underline ,(format nil "~10a" "Score")) #\space
-		       (:underline ,(format nil "~10a" "Name")) #\space
-		       (:underline ,(format nil "~16a" "Time")) #\space))
+      (setf line
+	    (span-to-fat-string
+	     `(#\space
+	       (:underline ,(format nil "~10a" "Score")) #\space
+	       (:underline ,(format nil "~10a" "Name")) #\space
+	       (:underline ,(format nil "~16a" "Time")) #\space)))
+      (tt-write-string (osubseq line 0 (min (- (tt-width) left 3)
+					    (olength line))))
       (loop :with s
 	 :for i :from 0 :below (- lines 3)
 	 :for sl = (scores-scores scores) :then (cdr sl)
@@ -550,38 +665,73 @@
 	   (setf s (car sl))
 	   (tt-move-to (+ top 2 i) (1+ left))
 	   (tt-write-char #\space)
-	   (when (and (not (zerop (tetris-score-time o)))
-		      (= (score-time s) (tetris-score-time o)))
+	   (when (our-score-p o s)
 	     (tt-inverse t))
-	   (if s
-	     (tt-format "~10d ~10a ~16a"
-			(score-n s) (score-name s)
-			;;(dlib-misc:date-string :time (score-time s))
-			(dlib-misc:format-date
-			 "~d-~2,'0d-~2,'0d ~2,'0d:~2,'0d"
-			 (:year :month :date :hours :minutes)
-			 :time (score-time s)))
-	     (dotimes (i (+ 10 1 10 1 16)) (tt-write-char #\space)))
-	   (when (and (not (zerop (tetris-score-time o)))
-		      (= (score-time s) (tetris-score-time o)))
+	   (setf line
+		 (with-output-to-string (str)
+		   (if s
+		       (format str "~10d ~10a ~16a"
+			       (score-n s) (score-name s)
+			       (dlib-misc:format-date
+				"~d-~2,'0d-~2,'0d ~2,'0d:~2,'0d"
+				(:year :month :date :hours :minutes)
+				:time (score-time s)))
+		       (dotimes (i (+ 10 1 10 1 16)) (write-char #\space str)))))
+	   (tt-write-string (subseq line 0 (min (- (tt-width) left 4)
+						(length line))))
+	   (when (our-score-p o s)
 	     (tt-inverse nil))
-	   (tt-write-char #\space))
+	   ;;(tt-write-char #\space)
+	   )
       (tt-finish-output)
       (when pause-after
 	(tt-get-key)))))
 
 (defmethod await-event ((o tetris))
   "Image viewer event."
-  (with-slots (paused rate debug-flag next) o
-    (cond
-      (paused
-       (if (and (char-equal #\z (tt-get-key)) debug-flag)
-	   (setf next (make-piece :style (random-style)))
-	   (setf paused nil)))
-      ((tt-listen-for rate)
-       (tt-get-key))
-      (t
-       (move-down o)))))
+  (with-slots (paused rate debug-flag next drop-start) o
+    (let ((time-left (dtime- rate (dtime- (get-dtime) drop-start))))
+      ;; (tt-move-to 23 0)
+      ;; (tt-format "~s ~s" time-left
+      ;; 		 (coerce (dtime-to time-left :seconds) 'float))
+      (cond
+	(paused
+	 (if (and (char-equal #\z (tt-get-key)) debug-flag)
+	     (setf next (make-piece :style (random-style)))
+	     (setf paused nil)))
+	((and (dtime-plusp time-left)
+	      (tt-listen-for (dtime-to time-left :seconds)))
+	 (tt-get-key))
+	(t
+	 (move-down o)
+	 (setf drop-start (get-dtime)))))))
+
+(defun show-key-help ()
+  ;; Turn / turning          - 8 поворот
+  ;; Left                    - 7 налево
+  ;; Right                   - 9 направо
+  ;; Speed up                - 4 ускорить
+  ;; Reset                   - 5 сбросить
+  ;; Show next               - 1 показать следующую
+  ;; Clear/erase this text   - 0 следующую зтот текст
+  ;; space - reset           - проБел - сбросить
+  (tt-write-string-at 11 41 "Keys:")
+  (loop :with line
+     :for k :in '(("q"           . "Quit")
+		  ("d / 7"       . "Rotate Left")
+		  ("f / 9"       . "Roate Right")
+		  ("<left>  / h" . "Move left")
+		  ("<right> / l" . "Move right")
+		  ("space"       . "Drop piece")
+		  ("p / s"       . "Pause / Show scores")
+		  ("o"           . "Options")
+		  ("n"           . "New Game"))
+     :for i :from 0
+     :do
+       (setf line (format nil "~14a = ~a" (car k) (cdr k)))
+       (tt-move-to (+ 13 i) 41)
+       (tt-write-string (subseq line 0 (min (- (tt-width) 42)
+					    (length line))))))
 
 (defun set-bg-fill (x width)
   (let ((color
@@ -592,13 +742,27 @@
 		      0
 		      (max 0 (- 1 color .4))))))
 
+(defun grey-fill-color (pos max)
+  (let ((grey (- #xff (+ #x80 (truncate (/ (* pos #x60) max))))))
+    (vector :rgb8 grey grey grey)))
+
+(defun paused-char (o y x)
+  (with-slots (high-color width height) o
+    (if (high-color o)
+	(make-fatchar
+	 :c (fatchar-c *paused-char*)
+	 :fg :green
+	 :bg (vector :rgb 0 (max 0 (+ (/ (* y .4) height)
+				      (/ (* x .3) width))) 0))
+	*paused-char*)))
+
 (defmethod update-display ((o tetris))
-  (with-slots (board score next current paused width height level debug-flag
-	       high-color) o
+  (with-slots (board score next current paused width height level lines-cleared
+	       debug-flag high-color plain) o
     (tt-home)
     (tt-erase-below)
     (tt-color :red :default)
-    (tt-write-string-at 0 2 "TETЯIS")
+    (tt-write-string-at 0 2 (if plain "TETRIS" "TETЯIS"))
 
     ;; Write borders and board contents.
     (loop :with c :and grey :and style
@@ -606,9 +770,7 @@
 	 (tt-color :white :black)
 	 (tt-write-char-at y (1- *board-left*) #\<)
 	 (if high-color
-	     (progn
-	       (setf grey (- #xff (+ #x80 (truncate (/ (* y #x60) height)))))
-	       (tt-color :black (vector :rgb8 grey grey grey)))
+	     (tt-color :black (setf grey (grey-fill-color y height)))
 	     (tt-color :black :white))
 	 (tt-write-string-at y *board-left* "[]")
 	 (loop :for x :from 0 :below width
@@ -617,7 +779,7 @@
               (setf style (aref (board o) y x))
 	      (setf c
 		    (cond
-		      ((and paused (not debug-flag)) *paused-char*)
+		      ((and paused (not debug-flag)) (paused-char o x y))
 		      ((and high-color (zerop style))
 		       (set-bg-fill x1 (* width 2))
 		       #\space)
@@ -628,7 +790,7 @@
 	      (set-bg-fill (1+ x1) (* width 2))
 	      (tt-write-char c))
 	 (if high-color
-	     (tt-color :black (vector :rgb8 grey grey grey))
+	     (tt-color :black grey)
 	     (tt-color :black :white))
 	 (tt-write-string "[]")
 	 (tt-color :white :black)
@@ -636,8 +798,17 @@
     (tt-move-to height (1- *board-left*))
     (tt-write-char #\<)
     (tt-color :black :white)
-    (dotimes (i (+ width *block-width*))
-      (tt-write-string "[]"))
+
+    (loop :with w = (* (+ width *block-width*) 2)
+       :for i :from 0 :below w :by 2
+       :do
+	 (when high-color
+	   (tt-color :black (grey-fill-color i w)))
+	 (tt-write-string "[")
+	 (when high-color
+	   (tt-color :black (grey-fill-color (1+ i) w)))
+	 (tt-write-string "]"))
+
     (tt-color :white :black)
     (tt-write-char #\>)
     (tt-move-to (1+ height) *board-left*)
@@ -646,34 +817,25 @@
 
     ;; Score
     (tt-color :white :default)
-    (tt-write-string-at 2 2 "Score:")
+    (tt-write-string-at 2 2 "Score:") ;; счет
     (tt-move-to 3 2)
     (tt-format "~d" score)
-    (tt-write-string-at 5 2 "Level:")
+    (tt-write-string-at 5 2 "Level:") ;; уровень
     (tt-move-to 6 2)
     (tt-format "~d" level)
 
+    ;; полных "Full / total" строк "lines"
+    (tt-write-string-at 8 2 "Lines:")
+    (tt-move-to 9 2)
+    (tt-format "~d" lines-cleared)
+
     ;; Next piece
     (tt-write-string-at 0 40 "Next:")
-    (fui:draw-box 40 1 12 8)
+    (fui:draw-box 40 1 12 8 #|:plain plain|#)
     (draw-piece next :x 36 :y 3)
 
     ;; Key help
-    (tt-write-string-at 11 41 "Keys:")
-    (loop :for k :in '(("q"           . "Quit")
-		       ("d"           . "Rotate Left")
-		       ("f"           . "Roate Right")
-		       ("<left>  / h" . "Move left")
-		       ("<right> / l" . "Move right")
-		       ("space"       . "Drop piece")
-		       ("p / s"       . "Pause / Show scores")
-		       ("o"           . "Options")
-		       ("n"           . "New Game"))
-	 :for i :from 0
-       :do
-	 (tt-write-string-at (+ 13 i) 41 (car k))
-	 (tt-move-to (+ 13 i) 55)
-	 (tt-format "= ~a" (cdr k)))
+    (show-key-help)
 
     ;; The current piece
     (when (or (not paused) debug-flag)
@@ -697,55 +859,79 @@
     (initialize-board *tetris*)
     (load-piece *tetris*)))
 
-(defun confirm (title message)
+(defun confirm-box (title message)
   (char-equal
    #\y
    (loop :with c
       :do
-	(setf c (fui:display-text title message :y 9 :x 2))
+	(setf c (fui:display-text title message :y 9 :x 10))
       :until (member c '(#\y #\n) :test #'char-equal)
       :finally (return c))))
 
-(defun tetris (&key high-color)
+(defparameter *plain-acs-table* nil)
+
+(defun tetris (&key high-color plain)
   "Play Tetris."
-  (if (< (tt-height) 20)
-      (fui:display-text "Called off!"
+  (when (< (tt-height) 20)
+    (fui:display-text "Called off!"
        '("I'm sorry, but your terminal doesn't have enough lines to play
           Tetris properly. Try making your window at least 20 lines high."))
-      (with-terminal ()
-	(let ((*tetris* (make-instance 'tetris :high-color high-color)))
-	  (setf (tt-input-mode) :char)
-	  (tt-clear)
-	  (unwind-protect
-               (progn
-		 (tt-cursor-off)
-		 (with-slots (game-over scores score score-time) *tetris*
-		   (loop
-		      :do
-			(when game-over
-			  (restart-game))
-			(event-loop *tetris*)
-			(when (and game-over (not (zerop score)))
-			  (let ((s (make-instance 'tetris-score-v1
-						  :n score)))
-			    (save-score scores s)
-			    (setf score-time (score-time s))))
-		      :while
-			(and game-over
-			     (progn
-			       (show-tetris-scores *tetris* nil)
-			       (confirm
-				"Game Over"
-				'("Play again? (y / n)")))))
-		   (update-display *tetris*)))
-	    (tt-move-to (1- (tt-height)) 0)
-	    (tt-cursor-on))))))
+    (return-from tetris nil))
+  (when (and plain high-color)
+    (error "Plain and High-Color are contradictory settings. Please only use ~
+            one of them."))
+
+  (with-terminal ()
+    (when (and plain (not *plain-acs-table*))
+      (let (terminal-ansi::*acs-table*)
+	(terminal-ansi::make-acs-table terminal-ansi::*acs-table-data-plain*)
+	(setf *plain-acs-table* terminal-ansi::*acs-table*)))
+    (when plain
+      (setf (terminal-ansi::translate-alternate-characters
+	     (or (terminal-wrapped-terminal *terminal*)
+		 *terminal*)) t))
+    (let ((*tetris* (make-instance 'tetris
+				   :high-color high-color
+				   :plain plain))
+	  (terminal-ansi::*acs-table* *plain-acs-table*))
+      (setf *piece-char* (if high-color
+			     *high-color-piece-char*
+			     *low-color-piece-char*)
+	    (tt-input-mode) :char)
+      ;; (when plain
+      ;; 	((tt-alternate-characters nil))
+      (tt-clear)
+      (unwind-protect
+           (progn
+	     (tt-cursor-off)
+	     (with-slots (game-over scores score score-time) *tetris*
+	       (loop
+		  :do
+		    (when game-over
+		      (restart-game))
+		    (event-loop *tetris*)
+		    (when (and game-over (not (zerop score)))
+		      (let ((s (make-instance 'tetris-score-v1
+					      :n score)))
+			(save-score scores s)
+			(setf score-time (score-time s))))
+		  :while
+		    (and game-over
+			 (progn
+			   (show-tetris-scores *tetris* nil)
+			   (confirm-box
+			    "Game Over"
+			    '("Play again? (y / n)")))))
+	       (update-display *tetris*)))
+	(tt-move-to (1- (tt-height)) 0)
+	(tt-cursor-on)))))
 
 #+lish
 (lish:defcommand tetris
-  ((high-color boolean :short-arg #\c :help "True to use lots of colors."))
+  ((plain      boolean :short-arg #\p :help "True to use very plain characters.")
+   (high-color boolean :short-arg #\c :help "True to use lots of colors."))
   "Zone out with a certain gang of blocks."
   (catch nil
-    (tetris :high-color high-color)))
+    (tetris :high-color high-color :plain plain)))
 
 ;; EOF
