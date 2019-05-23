@@ -189,7 +189,7 @@
 		 (if 7-color
 		     (aref #(:red :blue :green :cyan :magenta :yellow
 			     :white) (random 7))
-		     (list (random 255) (random 255) (random 255))))
+		     (vector :rgb8 (random 255) (random 255) (random 255))))
 	       (turn-char (old-dir new-dir)
 		 "Return a character turning from old-dir to new-dir."
 		 (aref char-array
@@ -279,7 +279,8 @@
 		(when modeline
 		  (tt-move-to (1- (tt-height)) 0)
 		  ;; (tt-format "Rate: ~s" frame-rate)
-		  (tt-format "~w X:~d Y:~d ~s Rate: ~s" i x y dir frame-rate)
+		  (tt-format "~w X:~d Y:~d ~s Rate: ~s ~s"
+			     i x y dir frame-rate fg)
 		  (tt-move-to y x))
 		(tt-finish-output)))
 
@@ -330,7 +331,7 @@
    ;; (color-walk type :short-arg #\w
    ;;  :help "True to change pipe colors as they are drawn.")
    (type choice :short-arg #\t :default :normal
-    :choices ("normal" "heavy" "double" "ascii" "round")
+    :choices '("normal" "heavy" "double" "ascii" "round")
     :help "Type of pipes."))
   "Lay some pipes in your terminal."
   (pipes :wrap wrap :type type :frame-rate frame-rate :bold bold
