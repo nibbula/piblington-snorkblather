@@ -10,6 +10,6 @@
     :license            "GPLv3"
     :source-control	:git
     :long-description   "A text imitation of the classic pipe screensaver."
-    :depends-on (:dlib :char-util :terminal)
+    :depends-on (:dlib :char-util :terminal #+unix :terminal-ansi)
     :components
     ((:file "pipes")))
