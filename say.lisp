@@ -8,6 +8,9 @@
 	:terminal)
   (:export
    #:steal-critters
+   #:critters
+   #:ponies
+   #:all-critters
    #:say
    #:!say
    #:*cow-dir*
@@ -88,10 +91,14 @@
       (:vampire  . "VV")))
 
   (defparameter *borders*
-    '((:normal  . #("\\" "/"  "\\" "\\" "/"  "|"  "|"  "_"  "-"  "<"  ">"  "/"))
-      (:thought . #("o"  "("  ")"  "("  ")"  "("  ")"  "_"  "-"  "("  ")"  "o"))
-      (:unicode . #("╲" "╱" "╲" "╲" "╱" "▏" "▕" "▁" "▔" "(" ")" "╱"))
-      (:round   . #("╲" "╭" "╮" "╰" "╯" "▏" "▕" "▁" "▔" "(" ")" "╱"))
+    '((:normal .
+       #("\\" "/"  "\\" "\\" "/"  "|"  "|"  "_"  "-"  "<"  ">"  "/"))
+      (:thought .
+       #("o"  "("  ")"  "("  ")"  "("  ")"  "_"  "-"  "("  ")"  "o"))
+      (:unicode .
+       #("╲" "╱" "╲" "╲" "╱" "▏" "▕" "▁" "▔" "(" ")" "╱"))
+      (:round .
+       #("╲" "╭" "╮" "╰" "╯" "▏" "▕" "▁" "▔" "(" ")" "╱"))
       )))
 
 (defun justify (text width)
@@ -124,7 +131,9 @@
 (defun balloon (text width border no-wrap)
   "Output the ballon with TEXT word justified to WIDTH inside BORDER."
   (let* ((lines (split-sequence #\newline
-				(if no-wrap text (justify text width))
+				(if no-wrap
+				    (untabify text)
+				    (justify text width))
 				:omit-empty t))
 	 (processed-lines (->> lines
 			       (mapcar #'make-fatchar-string)
@@ -305,7 +314,7 @@ VARS. Variables look like: $var or ${var}."
 
 (defun all-critters ()
   (or *all-critters*
-      (append (critters) (ponies))))
+      (append (critters) (list :random) (ponies))))
 
 (defun get-template (thing)
   (cond
@@ -338,6 +347,10 @@ VARS. Variables look like: $var or ${var}."
 		   tongue (width 40) no-wrap)
   "Have a critter say something."
   (critters)
+  (when (eq (keywordify critter) :random)
+    (let* ((all (all-critters))
+	   (rr (elt all (random (length all)))))
+      (setf critter rr)))
   (let* ((template (get-template critter))
 	 (eyes-string (cdr (or (assoc eyes *cow-eyes*)
 			       (assoc :normal *cow-eyes*))))
@@ -365,16 +378,20 @@ VARS. Variables look like: $var or ${var}."
 (lish:defcommand say
   ((text string :optional t
     :help "Text for the critter to say.")
-   (critter choice :short-arg #\c :default :default :choice-func all-critters
+   (critter choice :short-arg #\c :default :default :choice-func 'all-critters
     :help "Who shall be your spokes-critter?")
    (list boolean :short-arg #\l :help "Show a list of critters.")
    (eyes choice :short-arg #\e :default :normal
-    :choices #.(mapcar #'car *cow-eyes*)
+    ;; :choices #.(mapcar #'car *cow-eyes*)
+    :choices *cow-eyes*
     :help "What to see with.")
    (border choice :short-arg #\b :default (default-border)
-    :choices #.(mapcar #'car *borders*)
+    ;; :choices #.(mapcar #'car *borders*)
+    :choices *borders*
     :help "Bubble which the text is in.")
-   (tongue choice :short-arg #\t :choices #.(mapcar #'car *tongues*)
+   (tongue choice :short-arg #\t
+    ;; :choices #.(mapcar #'car *tongues*)
+    :choices *tongues*
     :help "The licky part.")
    (width integer :short-arg #\w :default 40
     :help "The width of the text in the bubble.")
@@ -398,5 +415,22 @@ text, from something like figet."))
 	  :tongue tongue
 	  :width width
 	  :no-wrap no-wrap))))
+
+;; @@@ This foolishly uses things beyond the scope of this palinode.
+(lish:defcommand browse-critters ()
+  (with-terminal ()
+    (critters)
+    (ponies)
+    (let ((crits (coerce `(,@*critters* ,@*ponies*) 'vector)))
+      (loop :with c :and i = 40 :and name
+	 :while (not (equal c #\q))
+	 :do (tt-clear) (tt-finish-output)
+	   (setf name (string-downcase (string (aref crits i))))
+	   (lish:! "ff :standard \"" name "\" | lolcat | say -nc " name)
+	   (setf c (tt-get-key))
+	   (case c
+	     (#\q (return nil))
+	     (#\n (incf i))
+	     (#\p (decf i)))))))
 
 ;; EOF
