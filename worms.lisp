@@ -462,17 +462,17 @@ position and orientation."
 
 #+lish
 (lish:defcommand worms
-  (("paused" boolean :short-arg #\p
+  ((paused boolean :short-arg #\p
     :help "True to start off paused. Hit 'p' to unpause. Good for timing.")
-   ("length" integer :short-arg #\l :default 5
+   (length integer :short-arg #\l :default 5
     :help "How long each worm should be.")
-   ("number" integer :short-arg #\n :default 10
+   (number integer :short-arg #\n :default 10
     :help "The number of worms to create.")
-   ("trail" character :short-arg #\t :default #\space
+   (trail character :short-arg #\t :default #\space
     :help "A character for the worms to leave as a trail.")
-   ("field" string :short-arg #\f
+   (field string :short-arg #\f
     :help "A string which is put in the background.")
-   ("start" choice :short-arg #\s
+   (start choice :short-arg #\s
     :choices '(:center :random :corner) :default :center
     :help "Where to start the worms off from: :CENTER :RANDOM :CORNER."))
   "Make worms crawl about on the screen."
