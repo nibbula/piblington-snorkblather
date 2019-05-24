@@ -13,14 +13,11 @@
   ;; (:shadowing-import-from :curses #:timeout)
   (:use :cl :dlib :terminal)
   (:export
-   #:rain
-   #:!rain
-   #:stars
-   #:!stars
-   #:snow
-   #:!snow
-   #:mutrix
-   #:!mutrix
+   #:rain   #:!rain
+   #:stars  #:!stars
+   #:snow   #:!snow
+   #:mutrix #:!mutrix
+   #:fire   #:!fire
    ))
 (in-package :rain)
 
@@ -1040,6 +1037,7 @@ public double nextGaussian() {
 				   (setf time-out nil))
 			    ))))))))
       ;;(timeout -1)
+      (tt-normal)
       (tt-cursor-on)
       (tt-move-to (tt-height) 0)
       )))
