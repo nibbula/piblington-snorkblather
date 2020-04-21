@@ -5,7 +5,7 @@
 ;; This is like the old thing from a VAX or something.
 
 ;;(declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
-(declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
+;; (declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
 ;(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 
 (defpackage :rain
@@ -451,6 +451,15 @@ public double nextGaussian() {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Snow
 
+(defclass snow-drop (drop)
+  ((char
+    :initarg :char :accessor snow-drop-char :initform nil
+    :documentation "Character to draw.")
+   (age
+    :initarg :age :accessor snow-drop-age :initform 0 :type fixnum
+    :documentation "Age in cycles."))
+  (:documentation "Snow drop."))
+
 (defclass snowy (sky)
   ((snow-pos
     :initarg :snow-pos :accessor snow-pos :initform nil #| :type fixnum |#
@@ -458,13 +467,49 @@ public double nextGaussian() {
    (snow-chars
     :initarg :snow-chars :accessor snow-chars
     :documentation "Snow characters to use.")
-   (accumulation
-    :initarg :accumulation :accessor accumulate :initform 0.0 :type float
-    :documentation "Accumulation factor.")))
+   (high-mark
+    :initarg :high-mark :accessor snowy-high-mark :initform 0 :type fixnum
+    :documentation "Highest point the accumlation is up to.")
+   (bg
+    :initarg :bg :accessor snowy-bg :initform nil
+    :documentation "The background."))
+  (:default-initargs
+   :param 50)
+  (:documentation "A snowy day."))
 
-(defclass snow-drop (drop)
-  ((char :initarg :char :accessor snow-drop-char))
-  (:documentation "Snow drop."))
+(defmethod initialize-instance
+    :after ((o snowy) &rest initargs &key &allow-other-keys)
+  "Initialize a snowy."
+  (declare (ignore initargs))
+  (setf (snowy-bg o)
+	(make-array (list (tt-height) (tt-width))
+		    ;; :element-type 'snow-drop
+		    ;;:initial-element (make-instance 'snow-drop)
+		    :initial-element nil
+		    )
+	(snow-pos o) (random (1- (tt-width)))
+	(snowy-high-mark o) (1- (tt-height))))
+
+(defmethod resize-sky ((sky snowy))
+  (call-next-method)
+  (let* ((old-height (array-dimension (snowy-bg sky) 0))
+	 (old-width  (array-dimension (snowy-bg sky) 1))
+	 (new-height (tt-height))
+	 (new-width  (tt-width))
+	 (new-bg
+	  (make-array (list new-height new-width) :initial-element nil)))
+    (loop
+       :for oy :from (1- old-height)
+       :downto (max 0 (- old-height new-height))
+       :for y = (1- new-height) :then (1- y)
+       :do
+       (loop :for x :from 0 :below (min new-width old-width) :do
+	  (setf (aref new-bg y x) (aref (snowy-bg sky) oy x))))
+    (setf (snowy-bg sky) new-bg)
+    ;; Remove drop off the screen
+    (setf (drops sky)
+	  (remove-if (_ (or (> (drop-x _) (1- new-width))
+			    (> (drop-y _) (1- new-height)))) (drops sky)))))
 
 (defparameter *unicode-snow-chars*
   #(#.(code-char #x00002603) ; ☃ SNOWMAN
@@ -490,13 +535,25 @@ public double nextGaussian() {
 
 (defmethod create-drop ((sky snowy))
   "Create a drop in the snowy sky."
-  (push
-   (make-instance 'snow-drop
-		  :x (random (tt-width))
-		  :y (random (tt-height))
-		  :char (1+ (random (1- (length (snow-chars sky)))))
-		  :color (cons :white :black))
-   (drops sky)))
+  (let (x y (i 0))
+    ;; Pick an empty spot above the high mark. Give up after too many tries.
+    (loop
+       :do (setf x (random (tt-width))
+		 y (random (tt-height))
+		 i (1+ i))
+       :while (and (or (> y (snowy-high-mark sky))
+		       (aref (snowy-bg sky) y x)
+		       ;;(snow-drop-char (aref (snowy-bg sky) y x))
+		       )
+		   (< i 10000)))
+    (when (/= i 10000)
+      (push
+       (make-instance 'snow-drop
+		      :x x
+		      :y y
+		      :char (1+ (random (1- (length (snow-chars sky)))))
+		      :color (cons :white :black))
+       (drops sky)))))
 
 (defmethod draw-drop ((sky snowy) (drop snow-drop))
   (declare (type snow-drop drop))
@@ -509,17 +566,73 @@ public double nextGaussian() {
 	(tt-move-to y x)
 	(tt-write-char chr)))))
 
+(defun snow-accumulate-p (sky)
+  (< (random 100) (sky-param sky)))
+
 (defmethod drop-cycle ((sky snowy))
   (sleep .06)
-  (loop :for d :in (copy-list (drops sky)) :do
-     (incf (drop-y d))
-     (incf (drop-x d) (- 1 (random 3)))
-     (when (> (drop-y d) (1- (tt-height)))
-       (setf (drops sky) (delete d (drops sky))))))
+  (let ((height (array-dimension (snowy-bg sky) 0))
+	(width  (array-dimension (snowy-bg sky) 1))
+	saved-x saved-y)
+    (flet ((accumulate (d x y)
+	     (setf x (clamp x 0 (1- width))
+		   (aref (snowy-bg sky) y x) d
+		   (drop-x d) x
+		   (drop-y d) y
+		   (snowy-high-mark sky) (min (snowy-high-mark sky) y)))
+	   (move (from-x from-y to-x to-y)
+	     (setf (aref (snowy-bg sky) to-y to-x)
+		   (aref (snowy-bg sky) from-y from-x)
+		   (aref (snowy-bg sky) from-y from-x) nil)))
+      ;; Make drops fall
+      (loop
+	 :for d :in (copy-list (drops sky)) :do
+	 (setf saved-x (drop-x d)
+	       saved-y (drop-y d))
+	 (incf (drop-y d))
+	 (incf (drop-x d) (- 1 (random 3)))
+	 (cond
+	   ;; Tried to fall off the bottom
+	   ((>= (drop-y d) height)
+	    (when (and (< 0 (drop-x d) width) (snow-accumulate-p sky))
+	      ;; (setf (aref (snowy-bg sky) (drop-y d) (drop-x d)) d))
+	      (accumulate d saved-x saved-y))
+	    (setf (drops sky) (delete d (drops sky))))
+	   ;; There's something already there
+	   ((and
+	     (< 0 (drop-y d) height)
+	     (< 0 (drop-x d) width)
+	     ;; (snow-drop-char (aref (snowy-bg sky) (drop-y d) (drop-x d)))
+	     (aref (snowy-bg sky) (drop-y d) (drop-x d))
+	     )
+	    (when (snow-accumulate-p sky)
+	      ;; Put it on top of what's there.
+	      (accumulate d saved-x saved-y))
+	    (setf (drops sky) (delete d (drops sky))))))
+      ;; Apply gravity
+      (loop :for y :from (- height 2) :downto 0 :do
+	 (loop :for x :from 0 :below width :do
+	    (when (and (aref (snowy-bg sky) y x)
+		       (snow-drop-char (aref (snowy-bg sky) y x)))
+	      (cond
+		((not (aref (snowy-bg sky) (1+ y) x))
+		 (move x y x (1+ y)))
+		((and (> x 0) (not (aref (snowy-bg sky) (1+ y) (1- x))))
+		 (move x y (1- x) (1+ y)))
+		((and (< x (1- width))
+		      (not (aref (snowy-bg sky) (1+ y) (1+ x))))
+		 (move x y (1+ x) (1+ y))))))))))
 
 (defmethod draw-background ((sky snowy))
-  (when (not (snow-pos sky))
-    (setf (snow-pos sky) (random (1- (tt-width)))))
+  (loop :for y :from 0 :below (array-dimension (snowy-bg sky) 0) :do
+     (loop :for x :from 0 :below (array-dimension (snowy-bg sky) 1) :do
+	(when (and (aref (snowy-bg sky) y x)
+		   (snow-drop-char (aref (snowy-bg sky) y x)))
+	  (tt-write-char-at y x
+			    (aref (snow-chars sky)
+				  (snow-drop-char (aref (snowy-bg sky) y x))))
+	  )))
+  (tt-color :white :black)
   (tt-move-to (1- (tt-height)) (snow-pos sky))
   (tt-write-char (aref (snow-chars sky) 0)))
 
@@ -992,7 +1105,7 @@ public double nextGaussian() {
 	(tt-clear)
 	(tt-enable-events :resize)
 	(with-slots (time-out drops density param) sky
-	  (let ((last-t-o -1) modeline)
+	  (let ((last-t-o -1) modeline key)
 	    ;;(timeout time-out)
 	    (loop
 	       ;; create drops
@@ -1018,7 +1131,9 @@ public double nextGaussian() {
 	       (tt-finish-output)
 	       (when (or (not time-out)
 			 (tt-listen-for (/ time-out 1000)))
-		 (case (tt-get-key)
+		 (setf key (tt-get-key))
+		 ;; (dbugf :snow "key ~s~%" key)
+		 (case key
 		   ((#\q #\Q) (return))
 		   (:resize (resize-sky sky))
 		   (#\page (resize-sky sky))
