@@ -33,11 +33,11 @@
 
 (in-package :worms)
 
-;; (declaim (optimize (speed 3)) (optimize (safety 0))
-;;   	 (optimize (debug 0)) (optimize (space 0))
-;;    	 (optimize (compilation-speed 0)))
+(declaim (optimize (speed 3)) (optimize (safety 0))
+	 (optimize (debug 0)) (optimize (space 0))
+	 (optimize (compilation-speed 0)))
 
-(declaim (optimize (debug 3)))
+;; (declaim (optimize (debug 3)))
 
 (deftype fast-uint ()
   "A fast unsigned integer."
@@ -430,7 +430,7 @@ position and orientation."
 		   (start :center)
 		   paused)
   (declare (type (or string null) field)
-	   (type fixnum worm-length worm-number)
+	   (type number worm-length worm-number)
 	   (type character trail))
   (declare (ignore field))
 
@@ -439,12 +439,12 @@ position and orientation."
   (when (< worm-number 1)
     (error "Number of worms must be at least 1."))
 
-  (setf *worm-length* worm-length)
+  (setf *worm-length* (truncate worm-length))
   (setf *trail* (char-code trail))
 
   (initialize-curses paused)
   (resize-land)
-  (make-worms worm-length worm-number start)
+  (make-worms worm-length (truncate worm-number) start)
   (setf *quit-flag* nil)
   (let* ((lines *lines*)
 	 (bottom-line (- lines 1)))
@@ -464,9 +464,9 @@ position and orientation."
 (lish:defcommand worms
   ((paused boolean :short-arg #\p
     :help "True to start off paused. Hit 'p' to unpause. Good for timing.")
-   (length integer :short-arg #\l :default 5
+   (length number :short-arg #\l :default 5
     :help "How long each worm should be.")
-   (number integer :short-arg #\n :default 10
+   (number number :short-arg #\n :default 10
     :help "The number of worms to create.")
    (trail character :short-arg #\t :default #\space
     :help "A character for the worms to leave as a trail.")
