@@ -177,7 +177,7 @@
 (defun pipes (&key modeline paused (wrap t) (type :normal) (frame-rate 60) bold
 		cursor 7-color (number 3) (reset-interval 2000)
 		(color-change-probability .01) #| color-walk |#)
-  (with-terminal (#+unix :ansi)
+  (with-terminal (#|#+unix :ansi |#)
     (let ((char-array (second (assoc (keywordify type) *pipe-type*)))
 	  pipes
 	  (count 0)
