@@ -10,6 +10,6 @@
     :license            "GPL-3.0-only"
     :source-control	:git
     :long-description   "Generic games scores."
-    :depends-on (:dlib :opsys :dlib-misc)
+    :depends-on (:dlib :opsys :dlib-misc :dtime)
     :components
     ((:file "scores")))

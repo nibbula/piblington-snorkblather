@@ -4,7 +4,7 @@
 
 (defpackage :robots
   (:documentation "The dumb old robots game.")
-  (:use :cl :dlib :opsys :char-util :fui :terminal :scores)
+  (:use :cl :dlib :opsys :dtime :char-util :fui :terminal :scores)
   (:export
    ;; Main entry point
    #:robots
@@ -344,7 +344,7 @@ should stop wasting time on this damn thing."
 	     (tt-inverse t))
 	   (tt-format "~10d ~20a ~19a"
 		      (score-n s) (score-name s)
-		      (dlib-misc:date-string :time (score-time s)))
+		      (date-string :time (score-time s)))
 	   (when (and (robots-score-time r)
 		      (= (score-time s) (robots-score-time r)))
 	     (tt-inverse nil))

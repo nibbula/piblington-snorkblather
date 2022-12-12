@@ -1,16 +1,11 @@
-;;
-;; rain.lisp - Rain on the screen
-;;
+;;;
+;;; rain.lisp - Rain on the screen
+;;;
 
 ;; This is like the old thing from a VAX or something.
 
-;;(declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
-;; (declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
-;(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
-
 (defpackage :rain
   (:documentation "Rain on the screen.")
-  ;; (:shadowing-import-from :curses #:timeout)
   (:use :cl :dlib :terminal)
   (:export
    #:rain   #:!rain
@@ -89,109 +84,14 @@
 (defun random-color ()
   (cons (elt *drop-colors* (random (length *drop-colors*))) :black))
 
-#| Stolen from wikipedia:
-
-  float x1, x2, w, y1, y2;
-  do {
-    x1 = 2.0 * ranf() - 1.0;
-    x2 = 2.0 * ranf() - 1.0;
-    w = x1 * x1 + x2 * x2;
-  } while ( w >= 1.0 );
-
-  w = sqrt( (-2.0 * log( w ) ) / w );
-  y1 = x1 * w;
-  y2 = x2 * w;
-
-OR
-
-#include <math.h>
-
-extern float ranf();         /* ranf() is uniform in 0..1 */
-
-/* normal random variate generator */
-float box_muller(float m, float s) /* mean m, standard deviation s */
-{
-  float x1, x2, w, y1;
-  static float y2;
-  static int use_last = 0;
-
-  if (use_last)        /* use value from previous call */
-  {
-    y1 = y2;
-    use_last = 0;
-  }
-  else
-  {
-    do {
-      x1 = 2.0 * ranf() - 1.0;
-      x2 = 2.0 * ranf() - 1.0;
-      w = x1 * x1 + x2 * x2;
-    } while ( w >= 1.0 );
-
-    w = sqrt( (-2.0 * log( w ) ) / w );
-    y1 = x1 * w;
-    y2 = x2 * w;
-    use_last = 1;
-  }
-
-  return( m + y1 * s );
-}
-
-OR in C#
-
-#define TWO_PI 6.2831853071795864769252866
- 
-double generateGaussianNoise(const double &variance)
-{
-  static bool haveSpare = false;
-  static double rand1, rand2;
- 
-  if(haveSpare)
-  {
-    haveSpare = false;
-    return sqrt(variance * rand1) * sin(rand2);
-  }
- 
-  haveSpare = true;
- 
-  rand1 = rand() / ((double) RAND_MAX);
-  if (rand1 < 1e-100) rand1 = 1e-100;
-  rand1 = -2 * log(rand1);
-  rand2 = (rand() / ((double) RAND_MAX)) * TWO_PI;
- 
-  return sqrt(variance * rand1) * cos(rand2);
-}
-
-or Java
-
-private double nextNextGaussian;
-private boolean haveNextNextGaussian = false;
-public double nextGaussian() {
-  if (haveNextNextGaussian) {
-    haveNextNextGaussian = false;
-    return nextNextGaussian;
-  } else {
-    double v1, v2, s;
-    do {
-      v1 = 2 * nextDouble() - 1;   // between -1.0 and 1.0
-      v2 = 2 * nextDouble() - 1;   // between -1.0 and 1.0
-      s = v1 * v1 + v2 * v2;
-    } while (s >= 1 || s == 0);
-    double multiplier = StrictMath.sqrt(-2 * StrictMath.log(s)/s);
-    nextNextGaussian = v2 * multiplier;
-    haveNextNextGaussian = true;
-    return v1 * multiplier;
-  }
-}
-
-|#
-
+#|
 (defparameter *last-one* 0d0)
 (declaim (type double-float *last-one*))
 (defparameter *has-last-one* nil)
 (declaim (type boolean *has-last-one*))
 
 (declaim (ftype (function () double-float) normal-distribution-1))
+;;(declaim (ftype (function () float) normal-distribution-1))
 (defun normal-distribution-1 ()
   "Slow old fashioned normal distribution."
   (declare (optimize (speed 3) (safety 0)))
@@ -201,33 +101,71 @@ public double nextGaussian() {
 	*last-one*)
       (let ((x1 0d0) (x2 0d0) (w 0d0) (y1 0d0))
 	(declare (type double-float x1 x2 w y1))
+	;;(declare (type float x1 x2 w y1))
 	(loop :do
 	   (setf x1 (* 2.0 (- (random 1d0) 1d0))
 		 x2 (* 2.0 (- (random 1d0) 1d0))
 		 w (+ (* x1 x1) (* x2 x2)))
 	   :while (or (> w 1) (= w 0)))
-	(setf w (sqrt (/ (* -2d0 (log w)) w))
+	(setf w (realpart (sqrt (/ (* -2d0 (log w)) w)))
 	      y1 (* x1 w)
 	      *last-one* (* x2 w)
 	      *has-last-one* t)
-	(the double-float y1))))
+	(the float y1))))
 
 (defmacro with-slow-normal-dist (() &body body)
   "Wrap around calls of normal-distribution-1 to be thread “safe”."
   `(let ((*last-one* 0d0)
 	 (*has-last-one* nil))
      ,@body))
+|#
+
+(defparameter *last-one* 0.0)
+(declaim (type float *last-one*))
+(defparameter *has-last-one* nil)
+(declaim (type boolean *has-last-one*))
+
+(declaim (ftype (function () float) normal-distribution-1))
+(defun normal-distribution-1 ()
+  "Slow old fashioned normal distribution."
+  (declare (optimize (speed 3) (safety 0)))
+  (if *has-last-one*
+      (progn
+	(setf *has-last-one* nil)
+	*last-one*)
+      (let ((x1 0.0) (x2 0.0) (w 0.0) (y1 0.0))
+	(declare (type float x1 x2 w y1))
+	(loop :do
+	   (setf x1 (* 2.0 (- (random 1.0) 1.0))
+		 x2 (* 2.0 (- (random 1.0) 1.0))
+		 w (+ (* x1 x1) (* x2 x2)))
+	   :while (or (> w 1) (= w 0)))
+	(setf w (realpart (sqrt (/ (* -2.0 (log w)) w)))
+	      y1 (* x1 w)
+	      *last-one* (* x2 w)
+	      *has-last-one* t)
+	(the float y1))))
+
+(defmacro with-slow-normal-dist (() &body body)
+  "Wrap around calls of normal-distribution-1 to be thread “safe”."
+  `(let ((*last-one* 0.0)
+	 (*has-last-one* nil))
+     ,@body))
 
 ;; Stolen from:
 ;; https://github.com/tpapp/cl-random/blob/master/src/univariate.lisp
 ;; Which doesn't seem to have a license.
+;;
+;; I don't like code like this. We should show the derivation of all the
+;; constants.
 
 (defun normal-distribution-2 ()
   "Draw a random number from N(0,1)."
   ;; Method from Leva (1992). This is considered much better/faster than the
   ;; Box-Muller method.
   (declare (optimize (speed 3) (safety 0))
-	   #+sbcl (sb-ext:muffle-conditions sb-ext:compiler-note))
+	   ;; #+sbcl (sb-ext:muffle-conditions sb-ext:compiler-note)
+	   )
   (tagbody
    top
      (let* ((u (random 1d0))
@@ -709,13 +647,23 @@ public double nextGaussian() {
     (tt-bold nil)))
 
 (defmethod drop-cycle ((sky mutrix))
+  #|
   (loop :for d :in (copy-list (drops sky)) :do
      (setf (aref (mutrix-bg sky) (drop-x d) (drop-y d)) (mutrix-drop-char d))
      (incf (drop-y d))
      (when (not (zerop (mutrix-drop-char d)))
        (incf (mutrix-drop-char d)))
      (when (> (drop-y d) (1- (tt-height)))
-       (setf (drops sky) (delete d (drops sky))))))
+       (setf (drops sky) (delete d (drops sky)))))
+  |#
+  (loop :for d :in (drops sky) :do
+    (assert (and (< (drop-x d) (array-dimension (mutrix-bg sky) 0))
+		 (< (drop-y d) (array-dimension (mutrix-bg sky) 1))))
+    (setf (aref (mutrix-bg sky) (drop-x d) (drop-y d)) (mutrix-drop-char d))
+    (incf (drop-y d))
+    (when (not (zerop (mutrix-drop-char d)))
+      (incf (mutrix-drop-char d))))
+  (setf (drops sky) (delete-if (_ (> (drop-y _) (1- (tt-height)))) (drops sky))))
 
 (defmethod draw-background ((sky mutrix))
   "Draw the mutable background."
@@ -729,6 +677,28 @@ public double nextGaussian() {
 	(let ((cc (aref (mutrix-bg sky) x y)))
 	  (when (/= cc 0)
 	    (tt-write-char (code-char cc)))))))
+
+;; @@@ make a new class with a retained background
+(defmethod resize-sky ((sky mutrix))
+  (call-next-method)
+  (let* ((old-height (array-dimension (mutrix-bg sky) 0))
+	 (old-width  (array-dimension (mutrix-bg sky) 1))
+	 (new-height (tt-height))
+	 (new-width  (tt-width))
+	 (new-bg
+	  (make-array (list new-height new-width) :initial-element nil)))
+    (loop
+       :for oy :from (1- old-height)
+       :downto (max 0 (- old-height new-height))
+       :for y = (1- new-height) :then (1- y)
+       :do
+       (loop :for x :from 0 :below (min new-width old-width) :do
+	  (setf (aref new-bg y x) (aref (mutrix-bg sky) oy x))))
+    (setf (mutrix-bg sky) new-bg)
+    ;; Remove drop off the screen
+    (setf (drops sky)
+	  (remove-if (_ (or (> (drop-x _) (1- new-width))
+			    (> (drop-y _) (1- new-height)))) (drops sky)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Space
@@ -1093,69 +1063,86 @@ public double nextGaussian() {
 				:y (- (tt-height) (random 4))
 				:heat (+ .5 (random 0.5))) (drops sky)))))))
 
+(defmethod resize-sky ((sky fire))
+  (call-next-method)
+  )
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun fix-scrolling (value)
+  (when (eq :crunch (find-terminal-type-for-class
+		     (class-name (class-of *terminal*))))
+    (funcall (fdefinition `(setf ,(intern (string :allow-scrolling)
+					  :terminal-crunch)))
+	     value *terminal*)))
 
 (defmethod precipitate ((sky sky))
   (clear-sky sky)
   ;; (with-new-terminal ()
   (with-terminal ()
-    (unwind-protect
-      (progn
-	(tt-cursor-off)
-	(tt-clear)
-	(tt-enable-events :resize)
-	(with-slots (time-out drops density param) sky
-	  (let ((last-t-o -1) modeline key)
-	    ;;(timeout time-out)
-	    (loop
-	       ;; create drops
-	       (if (< density 1)
-		   (when (<= (random 1.0) density)
-		     (create-drop sky))
-		   (dotimes (i (ceiling density))
-		     (create-drop sky)))
-	       ;; draw drops
-	       (tt-home)
-	       (tt-erase-below)
-	       (draw-background sky)
-	       (draw-drops sky)
-	       ;; cycle drops
-	       (drop-cycle sky)
-	       (frame-end sky)
-	       (when modeline
-		 (tt-color :white :black)
-		 (tt-move-to (1- (tt-height)) 0)
-		 (tt-format "~a ~a ~a ~a"
-			    density time-out param (type-of *terminal*)))
-	       ;; check input
-	       (tt-finish-output)
-	       (when (or (not time-out)
-			 (tt-listen-for (/ time-out 1000)))
-		 (setf key (tt-get-key))
-		 ;; (dbugf :snow "key ~s~%" key)
-		 (case key
-		   ((#\q #\Q) (return))
-		   (:resize (resize-sky sky))
-		   (#\page (resize-sky sky))
-		   (#\+ (decf time-out 1))
-		   (#\- (incf time-out 1))
-		   (#\= (setf time-out *default-timeout*))
-		   (#\d (if (> density 1) (incf density) (incf density .1)))
-		   (#\D (if (>= density 2) (decf density) (decf density .1)))
-		   (#\i (incf (sky-param sky)))
-		   (#\I (decf (sky-param sky)))
-		   (#\m (setf modeline (not modeline)))
-		   (#\p (if (not time-out)
-			    (setf time-out last-t-o)
-			    (progn (setf last-t-o time-out)
-				   ;;(timeout (setf time-out -1))
-				   (setf time-out nil))
-			    ))))))))
-      ;;(timeout -1)
-      (tt-normal)
-      (tt-cursor-on)
-      (tt-move-to (tt-height) 0)
-      )))
+    (with-enabled-events ('(:resize))
+      (unwind-protect
+        (progn
+	  (tt-cursor-off)
+	  (tt-clear)
+	  (tt-enable-events :resize)
+	  (fix-scrolling nil)
+	  (when (eq :crunch (find-terminal-type-for-class
+			     (class-name (class-of *terminal*))))
+	    (funcall (fdefinition `(setf ,(intern (string :allow-scrolling)
+						  :terminal-crunch)))
+		     nil *terminal*))
+	  (with-slots (time-out drops density param) sky
+	    (let ((last-t-o -1) modeline key)
+	      ;;(timeout time-out)
+	      (loop
+		;; create drops
+		(if (< density 1)
+		    (when (<= (random 1.0) density)
+		      (create-drop sky))
+		    (dotimes (i (ceiling density))
+		      (create-drop sky)))
+		;; draw drops
+		(tt-home)
+		(tt-erase-below)
+		(draw-background sky)
+		(draw-drops sky)
+		;; cycle drops
+		(drop-cycle sky)
+		(frame-end sky)
+		(when modeline
+		  (tt-color :white :black)
+		  (tt-move-to (1- (tt-height)) 0)
+		  (tt-format "~a ~a ~a ~a"
+			     density time-out param (type-of *terminal*)))
+		;; check input
+		(tt-finish-output)
+		(when (or (not time-out)
+			  (tt-listen-for (/ time-out 1000)))
+		  (setf key (tt-get-key))
+		  ;; (dbugf :snow "key ~s~%" key)
+		  (case key
+		    ((#\q #\Q) (return))
+		    (:resize (resize-sky sky))
+		    (#\page (resize-sky sky))
+		    (#\+ (decf time-out 1))
+		    (#\- (incf time-out 1))
+		    (#\= (setf time-out *default-timeout*))
+		    (#\d (if (> density 1) (incf density) (incf density .1)))
+		    (#\D (if (>= density 2) (decf density) (decf density .1)))
+		    (#\i (incf (sky-param sky)))
+		    (#\I (decf (sky-param sky)))
+		    (#\m (setf modeline (not modeline)))
+		    (#\p (if (not time-out)
+			     (setf time-out last-t-o)
+			     (progn (setf last-t-o time-out)
+				    ;;(timeout (setf time-out -1))
+				    (setf time-out nil))))))))))
+	;;(timeout -1)
+	(tt-normal)
+	(tt-cursor-on)
+	(fix-scrolling t)
+	(tt-move-to (tt-height) 0)))))
 
 (defun rain (&key (density 0.5))
   (precipitate (make-instance 'rainy :density density)))

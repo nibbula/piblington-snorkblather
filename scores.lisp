@@ -56,7 +56,7 @@ Example usage:
   READ-SCORE-VERSION and WRITE-SCORE-VERSION methods. The default methods just
   read and write the slots of the score class.
 ")
-  (:use :cl :dlib :opsys :dlib-misc)
+  (:use :cl :dlib :opsys :dlib-misc :dtime)
   (:export
    #:score
    #:score-n

@@ -1,6 +1,6 @@
-;;
-;; say.lisp - Have critters say stuff.
-;;
+;;;
+;;; say.lisp - Have critters say stuff.
+;;;
 
 (defpackage :say
   (:documentation "Have critters say stuff.")
@@ -187,7 +187,7 @@
 	 ;; bottom line
 	 (derp-line bottom))))))
 
-(defparameter *identifier-chars* "_{}")
+(defparameter *identifier-chars* "_{")
 
 (defun critter (template vars &key pony)
   "Output a critter in TEMPLATE, replacing variables from the property list
@@ -205,12 +205,11 @@ VARS. Variables look like: $var or ${var}."
 		       (symbolify
 			(remove-if (_ (or (char= #\{ _) (char= #\} _)))
 				   (subseq template (1+ i) end))
-			:package :say
-			)
-		       )
-		 (dbugf :say "var ~s~%" result)
-		 )
-	       (setf i (if pony end (1- end)))
+			:package :say))
+		 (dbugf :say "var ~s~%" result))
+	       (setf i (if (or pony (char= (char template end) #\}))
+			   end
+			   (1- end)))
 	       result)))
       (loop :with var :and c :and value :and var-start
 	 :while (< i (length template)) :do
@@ -257,14 +256,21 @@ VARS. Variables look like: $var or ${var}."
 (defparameter *ponies* nil
   "List of pony files.")
 
+(defvar *ponyless* nil
+  "Omit the poor little ponies!")
+
 (defun ponies ()
+  ;; @@@ ponyless doesn't work when we're called in the command arg parsing!
+  ;; (format t "*ponyless* = ~s~%" *ponyless*)
+  ;; (break)
   (or *ponies*
       (setf *ponies*
-	    (loop :for dir :in *pony-dirs*
-	       :when (nos:probe-directory dir)
-	       :nconc
-	       (mapcar (_ (nos:path-file-name (nos:path-snip-ext _)))
-		       (glob (nos:path-append dir "*.pony")))))))
+	    (when (not *ponyless*)
+	      (loop :for dir :in *pony-dirs*
+		 :when (nos:probe-directory dir)
+		 :nconc
+		 (mapcar (_ (nos:path-file-name (nos:path-snip-ext _)))
+			 (glob (nos:path-append dir "*.pony"))))))))
 
 (defun ponyp (thing)
   (find (string thing) *ponies* :test #'equalp))
@@ -344,69 +350,75 @@ VARS. Variables look like: $var or ${var}."
 	:normal)))
 
 (defun say (text &key (critter :default) (eyes :normal) (border (default-border))
-		   tongue (width 40) no-wrap)
+		   tongue (width 40) no-wrap ponyless)
   "Have a critter say something."
-  (critters)
-  (when (eq (keywordify critter) :random)
-    (let* ((all (all-critters))
-	   (rr (elt all (random (length all)))))
-      (setf critter rr)))
-  (let* ((template (get-template critter))
-	 (eyes-string (cdr (or (assoc eyes *cow-eyes*)
-			       (assoc :normal *cow-eyes*))))
-	 (tongue-name (or tongue
-			  (if (member eyes '(:stoned :dead)) eyes :normal)))
-	 (tongue-string (cdr (or (assoc tongue-name *tongues*)
-				 (assoc :normal *tongues*)))))
-    (balloon text width border no-wrap)
-    (cond
-      ((critterp critter)
-       (critter template `((eyes     . ,eyes-string)
-			   (tongue   . ,tongue-string)
-			   (thoughts . ,(thoughts border)))))
-      ((ponyp critter)
-       (let ((*identifier-chars* "/\\"))
-	 (critter template `((|\\|    . ,(thoughts border :type :left))
-			     (|/|     . ,(thoughts border :type :right))
-			     (||      . "$")
-			     ;;(|ballon| . ,(thoughts border))
-			     )
-		  :pony t))))
-    (values)))
+  (let ((*ponyless* ponyless))
+    (critters)
+    (when (eq (keywordify critter) :random)
+      (let* ((all (all-critters))
+	     (rr (elt all (random (length all)))))
+	(setf critter rr)))
+    (setf eyes (keywordify eyes)
+	  tongue (keywordify tongue)
+	  border (keywordify border))
+    (let* ((template (get-template critter))
+	   (eyes-string (cdr (or (assoc eyes *cow-eyes*)
+				 (assoc :normal *cow-eyes*))))
+	   (tongue-name (or tongue
+			    (if (member eyes '(:stoned :dead)) eyes :normal)))
+	   (tongue-string (cdr (or (assoc tongue-name *tongues*)
+				   (assoc :normal *tongues*)))))
+      (balloon text width border no-wrap)
+      (cond
+	((critterp critter)
+	 (critter template `((eyes     . ,eyes-string)
+			     (tongue   . ,tongue-string)
+			     (thoughts . ,(thoughts border)))))
+	((ponyp critter)
+	 (let ((*identifier-chars* "/\\"))
+	   (critter template `((|\\|    . ,(thoughts border :type :left))
+			       (|/|     . ,(thoughts border :type :right))
+			       (||      . "$")
+			       ;;(|ballon| . ,(thoughts border))
+			       )
+		    :pony t))))
+      (values))))
 
 #+lish
 (lish:defcommand say
   ((text string :optional t
     :help "Text for the critter to say.")
+   (ponyless boolean :short-arg #\p :default nil
+    :help "Nix the ponies! How could you do such a thing??")
    (critter choice :short-arg #\c :default :default :choice-func 'all-critters
     :help "Who shall be your spokes-critter?")
    (list boolean :short-arg #\l :help "Show a list of critters.")
    (eyes choice :short-arg #\e :default :normal
-    ;; :choices #.(mapcar #'car *cow-eyes*)
-    :choices *cow-eyes*
+    :choices (mapcar (_ (string-downcase (car _))) *cow-eyes*)
     :help "What to see with.")
    (border choice :short-arg #\b :default (default-border)
-    ;; :choices #.(mapcar #'car *borders*)
-    :choices *borders*
+    :choices (mapcar (_ (string-downcase (car _))) *borders*)
     :help "Bubble which the text is in.")
    (tongue choice :short-arg #\t
-    ;; :choices #.(mapcar #'car *tongues*)
-    :choices *tongues*
+    :choices (mapcar (_ (string-downcase (car _))) *tongues*)
     :help "The licky part.")
    (width integer :short-arg #\w :default 40
     :help "The width of the text in the bubble.")
    (no-wrap boolean :short-arg #\n
     :help "True not to wrap the text in the balloon. Useful for preformatted
-text, from something like figet."))
+text, from something like figet.")
+   (help boolean :short-arg #\? :help "Show this help."))
   :accepts (:grotty-stream :stream string)
   "Have critters say stuff."
-  (when (and (not text) (not list))
+  (when (and (not text) (not list) (not help))
     (setf text (or (and (typep lish:*input* '(or stream string fat-string))
 			lish:*input*)
 		   (slurp *standard-input*))))
   (cond
+    (help (lish:print-command-help (lish:command "say")))
     (list
-     (setf lish:*output* (list-critters)))
+     (let ((*ponyless* ponyless))
+       (setf lish:*output* (list-critters))))
     (t
      (say text
 	  :critter critter
@@ -414,7 +426,8 @@ text, from something like figet."))
 	  :border (keywordify border)
 	  :tongue tongue
 	  :width width
-	  :no-wrap no-wrap))))
+	  :no-wrap no-wrap
+	  :ponyless ponyless))))
 
 ;; @@@ This foolishly uses things beyond the scope of this palinode.
 (lish:defcommand browse-critters ()
