@@ -1,11 +1,11 @@
-;;
-;; tetris.lisp - A game you may know.
-;;
+;;;
+;;; tetris.lisp - A game you may know.
+;;;
 
 (defpackage :tetris
   (:documentation "Waste your time.")
-  (:use :cl :dlib :dlib-misc :terminal :inator :terminal-inator :fatchar :keymap
-	:scores :collections)
+  (:use :cl :dlib :dlib-misc :dtime :terminal :inator :terminal-inator :fatchar
+	:keymap :scores :collections)
   (:export
    #:tetris
    ))
@@ -17,20 +17,20 @@
 ;; Russian neighbor. I had originally called the game, "Puzzbuttle", and in my
 ;; mind, this shall always be it's true name, but I had taken to calling it
 ;; "Tetris", after perhaps misunderstanding my aformentioned neighbor's rounds
-;; of shouting, as well as my wife's less than enthusiastic response to the
-;; name "Puzzbuttle". My neighbor was completely within reason, since I had
-;; been practicing my amateur rocketry in, or rather, partially through, his
-;; garden, and had on a number of occasions, caused minor conflagurations to
-;; occur in the vicinity. In those days rocketry was not as technologically
-;; sound as it is today, and mishaps with fuel were quite usual. All that
-;; notwithstanding, I give notice, yet again, as I first did in 1938, after
-;; many failings at getting backers for the game with bricks, no matter how
-;; small, or decorative I was prepared to make them. I hereby give notice, yet
-;; again, that I disavow all claim to rights to the design or titles, and wish
-;; for all humanity, and even all beings throughout the cosmos, to be able to
-;; play this game, in whatever form they deem fit, in perpetuity, for all
-;; eternity, or as long as they see fit to do so, and without any charge or
-;; obligation whatsoever.
+;; of shouting, my numerous knocks to the noodle, as well as my wife's less
+;; than enthusiastic response to the name "Puzzbuttle". My neighbor was
+;; completely within reason, since I had been practicing my amateur rocketry
+;; in, or rather, partially through, his garden, and had on a number of
+;; occasions, caused minor conflagurations to occur in the vicinity. In those
+;; days rocketry was not as technologically sound as it is today, and mishaps
+;; with fuel were quite usual. All that notwithstanding, I give notice, yet
+;; again, as I first did in 1938, after many failings at getting backers for
+;; the game with bricks, no matter how small, or decorative I was prepared to
+;; make them. I hereby give notice, yet again, that I disavow all claim to
+;; rights to the design or titles, and wish for all humanity, and even all
+;; beings throughout the cosmos, to be able to play this game, in whatever
+;; form they deem fit, in perpetuity, for all eternity, or as long as they see
+;; fit to do so, and without any charge or obligation whatsoever.
 
 (declaim (optimize (speed 0) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 
@@ -50,7 +50,7 @@
 
  @  @        @
 @@@ @@  @@@ @@
-    @    @   @
+	@    @   @
 
  @  @@@  @@ @
  @  @     @ @@@
@@ -77,41 +77,41 @@
 
 (defparameter *base-pieces*
   #(#(#*0100 ; T
-      #*1110
-      #*0000
-      #*0000)
-    #(#*1000 ; L
-      #*1000
-      #*1100
-      #*0000)
-    #(#*0001 ; J
-      #*0001
-      #*0011
-      #*0000)
-    #(#*0010 ; S
-      #*0110
-      #*0100
-      #*0000)
-    #(#*0100 ; Z
-      #*0110
-      #*0010
-      #*0000)
-    #(#*0000 ; O
-      #*0110
-      #*0110
-      #*0000)
-    #(#*0010 ; I
-      #*0010
-      #*0010
-      #*0010)))
+	  #*1110
+	  #*0000
+	  #*0000)
+	#(#*1000 ; L
+	  #*1000
+	  #*1100
+	  #*0000)
+	#(#*0001 ; J
+	  #*0001
+	  #*0011
+	  #*0000)
+	#(#*0010 ; S
+	  #*0110
+	  #*0100
+	  #*0000)
+	#(#*0100 ; Z
+	  #*0110
+	  #*0010
+	  #*0000)
+	#(#*0000 ; O
+	  #*0110
+	  #*0110
+	  #*0000)
+	#(#*0010 ; I
+	  #*0010
+	  #*0010
+	  #*0010)))
 
 (defun rotate-bits (bits)
   (let ((result (make-array 4 :element-type 'bit-vector
-			    :initial-contents
-			    (loop :repeat 4 :collect
-				 (make-array 4 :element-type 'bit)))))
+			      :initial-contents
+			      (loop :repeat 4 :collect
+				       (make-array 4 :element-type 'bit)))))
     (loop :for i :from 0 :below 4 :do
-      (loop :for j :from 0 :below 4 :do
+       (loop :for j :from 0 :below 4 :do
          (setf (aref (aref result (- 3 j)) i)
 	       (aref (aref bits i) j))))
     result))
@@ -121,20 +121,19 @@
   (let* ((new-piece (remove-if (_ (every #'zerop _)) piece))
 	 (keep-cols
 	  (loop :for x :from 0 :below (length (aref new-piece 0))
-	     :if (some (_ (plusp (aref _ x))) piece)
-	     :collect x)))
+		 :if (some (_ (plusp (aref _ x))) piece)
+		 :collect x)))
     (setf new-piece
 	  (make-array
 	   (length new-piece)
 	   :element-type 'bit-vector
 	   :initial-contents
 	   (loop :for y :from 0 :below (length new-piece)
-	      :collect
-		(make-array
-		 (length keep-cols) :element-type 'bit
-		 :initial-contents
-		 (loop :for c :in keep-cols
-		    :collect (aref (aref new-piece y) c))))))
+	     :collect (make-array (length keep-cols)
+		       :element-type 'bit
+		       :initial-contents
+		       (loop :for c :in keep-cols
+			     :collect (aref (aref new-piece y) c))))))
     new-piece))
 
 (defun make-pieces ()
@@ -143,18 +142,18 @@
     ;; Make the rotations.
     (loop :for p :from 0 :below 7 :do
       (loop :with pp = (setf (aref result p) (make-array 4))
-	 :for rot :from 0 :below 4 :do
-	   ;;(format t "rot ~s ~s~%" p rot)
-           (setf (aref pp rot)
-		  (if (zerop rot)
-		      (copy-seq (aref *base-pieces* p))
-		      (rotate-bits (aref pp (1- rot)))))))
+        :for rot :from 0 :below 4 :do
+	;;(format t "rot ~s ~s~%" p rot)
+	(setf (aref pp rot)
+	      (if (zerop rot)
+		  (copy-seq (aref *base-pieces* p))
+		  (rotate-bits (aref pp (1- rot)))))))
     ;; Trim pieces
     (loop :for p :from 0 :below 7 :do
       (loop :with pp = (aref result p)
-	 :for rot :from 0 :below 4 :do
-	   ;;(format t "trim ~s ~s~%" p rot)
-	   (setf (aref pp rot) (trim-piece (aref pp rot)))))
+        :for rot :from 0 :below 4 :do
+	;;(format t "trim ~s ~s~%" p rot)
+	(setf (aref pp rot) (trim-piece (aref pp rot)))))
     result))
 
 (defparameter *piece* (make-pieces)
@@ -169,61 +168,61 @@
 
 (defparameter *low-color-piece-char*
   (make-array 8 :element-type 'fatchar
-	      :initial-contents
-	      `(,(make-fatchar :c #\space)
-		 ;; ,(make-fatchar :bg :black   :fg :cyan    :c #\#
-		 ;; 		:attrs '(:bold :inverse))	    ; T
-		 ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\*)   ; L
-		 ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\@)   ; J
-		 ;; ,(make-fatchar :bg :white   :fg :magenta :c #\%)   ; S
-		 ;; ,(make-fatchar :bg :green   :fg :black   :c #\*)   ; Z
-		 ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\O)   ; O
-		 ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\+)))) ; I
-		 ;;;
-		 ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\#)   ; T
-		 ;; ,(make-fatchar :bg :white   :fg :blue    :c #\*)   ; L
-		 ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\@)   ; J
-		 ;; ,(make-fatchar :bg :green   :fg :black   :c #\%)   ; S
-		 ;; ,(make-fatchar :bg :cyan    :fg :black   :c #\*)   ; Z
-		 ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\O)   ; O
-		 ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\+)))) ; I
-		 ;; ░▒▓
-		 ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\space)   ; T
-		 ;; ,(make-fatchar :bg :white   :fg :blue    :c #\░)   ; L
-		 ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\▒)   ; J
-		 ;; ,(make-fatchar :bg :green   :fg :black   :c #\▓)   ; S
-		 ;; ,(make-fatchar :bg :cyan    :fg :black   :c #\░)   ; Z
-		 ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\space)   ; O
-		 ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\space)))) ; I
-		 ;;
-		 ,(make-fatchar :bg :yellow  :fg :red     :c #\space)   ; T
-		 ,(make-fatchar :bg :white   :fg :blue    :c #\space)   ; L
-		 ,(make-fatchar :bg :magenta :fg :blue    :c #\space)   ; J
-		 ,(make-fatchar :bg :green   :fg :black   :c #\space)   ; S
-		 ,(make-fatchar :bg :cyan    :fg :black   :c #\space)   ; Z
-		 ,(make-fatchar :bg :blue    :fg :cyan    :c #\space)   ; O
-		 ,(make-fatchar :bg :red     :fg :yellow  :c #\space)))) ; I
+		:initial-contents
+		`(,(make-fatchar :c #\space)
+		  ;; ,(make-fatchar :bg :black   :fg :cyan    :c #\#
+		  ;; 		:attrs '(:bold :inverse))	    ; T
+		  ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\*)   ; L
+		  ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\@)   ; J
+		  ;; ,(make-fatchar :bg :white   :fg :magenta :c #\%)   ; S
+		  ;; ,(make-fatchar :bg :green   :fg :black   :c #\*)   ; Z
+		  ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\O)   ; O
+		  ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\+)))) ; I
+                  ;;
+		  ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\#)   ; T
+		  ;; ,(make-fatchar :bg :white   :fg :blue    :c #\*)   ; L
+		  ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\@)   ; J
+		  ;; ,(make-fatchar :bg :green   :fg :black   :c #\%)   ; S
+		  ;; ,(make-fatchar :bg :cyan    :fg :black   :c #\*)   ; Z
+		  ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\O)   ; O
+		  ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\+)))) ; I
+		  ;; ░▒▓
+		  ;; ,(make-fatchar :bg :yellow  :fg :red     :c #\space)   ; T
+		  ;; ,(make-fatchar :bg :white   :fg :blue    :c #\░)   ; L
+		  ;; ,(make-fatchar :bg :magenta :fg :blue    :c #\▒)   ; J
+		  ;; ,(make-fatchar :bg :green   :fg :black   :c #\▓)   ; S
+		  ;; ,(make-fatchar :bg :cyan    :fg :black   :c #\░)   ; Z
+		  ;; ,(make-fatchar :bg :blue    :fg :cyan    :c #\space)   ; O
+		  ;; ,(make-fatchar :bg :red     :fg :yellow  :c #\space)))) ; I
+		  ;;
+		  ,(make-fatchar :bg :yellow  :fg :red     :c #\space)   ; T
+		  ,(make-fatchar :bg :white   :fg :blue    :c #\space)   ; L
+		  ,(make-fatchar :bg :magenta :fg :blue    :c #\space)   ; J
+		  ,(make-fatchar :bg :green   :fg :black   :c #\space)   ; S
+		  ,(make-fatchar :bg :cyan    :fg :black   :c #\space)   ; Z
+		  ,(make-fatchar :bg :blue    :fg :cyan    :c #\space)   ; O
+		  ,(make-fatchar :bg :red     :fg :yellow  :c #\space)))) ; I
 
 (defparameter *high-color-piece-char*
   (make-array
    8 :element-type 'fatchar
    :initial-contents
    `(,(make-fatchar :c #\space)
-      ;; ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\◙)  ; T
-      ;; ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\☐)  ; L
-      ;; ,(make-fatchar :bg :magenta         :fg #(:rgb .8  0 .8) :c #\☐)  ; J
-      ;; ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\■)  ; S
-      ;; ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .8 .8) :c #\❖)  ; Z
-      ;; ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
-      ;; ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\♥) ; I
-      ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\┼)  ; T
-      ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\╱)  ; L
-      ,(make-fatchar :bg :magenta         :fg #(:rgb .7  0 .7) :c #\╲)  ; J
-      ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\o)  ; S
-      ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .7 .7) :c #\*)  ; Z
-      ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
-      ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\│) ; I
-      )))
+     ;; ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\◙)  ; T
+     ;; ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\☐)  ; L
+     ;; ,(make-fatchar :bg :magenta         :fg #(:rgb .8  0 .8) :c #\☐)  ; J
+     ;; ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\■)  ; S
+     ;; ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .8 .8) :c #\❖)  ; Z
+     ;; ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
+     ;; ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\♥) ; I
+     ,(make-fatchar :bg #(:rgb  1  1  0) :fg #(:rgb .8 .8  0) :c #\┼)  ; T
+     ,(make-fatchar :bg :white           :fg #(:rgb .7 .7 .7) :c #\╱)  ; L
+     ,(make-fatchar :bg :magenta         :fg #(:rgb .7  0 .7) :c #\╲)  ; J
+     ,(make-fatchar :bg #(:rgb .0 .8  0) :fg #(:rgb .0  1  0) :c #\o)  ; S
+     ,(make-fatchar :bg :cyan            :fg #(:rgb .0 .7 .7) :c #\*)  ; Z
+     ,(make-fatchar :bg :blue            :fg #(:rgb .0 .0 .8) :c #\╳)  ; O
+     ,(make-fatchar :bg :red             :fg #(:rgb  1 .3 .3) :c #\│) ; I
+     )))
 
 (defparameter *piece-char* *low-color-piece-char*)
 
@@ -252,8 +251,9 @@
   "Return the fall rate based on the level."
   (make-dtime-as
    (cond
-     ((< level 10) (aref #(4/5 43/60 19/30 11/20 7/15 23/60 3/10 13/60 2/15 1/10)
-			 level))
+     ((< level 10)
+      (aref #(4/5 43/60 19/30 11/20 7/15 23/60 3/10 13/60 2/15 1/10)
+	    level))
      ((< level 13) 1/12)
      ((< level 15) 1/15)
      ((< level 18) 1/20)
@@ -388,7 +388,7 @@
         (loop :for x :from 0 :below (length (aref p y)) :do
 	  (setf bx (+ (piece-x piece) x)
 		by (+ (piece-y piece) y))
-          (when (plusp (aref (aref p y) x))
+	  (when (plusp (aref (aref p y) x))
 	    (cond
 	      ((< (+ (piece-x piece) x) 0)
 	       ;; Hit the left wall
@@ -445,10 +445,10 @@
   "Animate filling a line with CHAR."
   (with-slots (width) o
     (loop :for x :from 0 :below (* width *block-width*) :by *block-width*
-       :do (tt-write-char-at line (+ x *board-left* *block-width*) char)
-	 (tt-write-char char)
-	 (sleep *zap-sleep*)
-	 (tt-finish-output)))
+      :do (tt-write-char-at line (+ x *board-left* *block-width*) char)
+	  (tt-write-char char)
+	  (sleep *zap-sleep*)
+	  (tt-finish-output)))
   ;; (tt-get-key)
   )
 
@@ -469,13 +469,13 @@
 (defun remove-lines (o)
   (with-slots (board height width score level lines-cleared rate) o
     (let* ((rows-to-zap
-	    (loop :with row
-	       :for i :from (1- height) :downto 0 :do
-		 (setf row (board-row o i))
+	     (loop :with row
+	       :for i :from (1- height) :downto 0
+	         :do (setf row (board-row o i))
 	       :when (every (_ (not (zerop _))) row)
-	       :collect i
+	         :collect i
 	       :and
-	       :do (zap-line o i *zap-char*)))
+	         :do (zap-line o i *zap-char*)))
 	   (cleared (length rows-to-zap)))
       (incf score
 	    (case cleared
@@ -489,15 +489,15 @@
       (setf level (lines-level lines-cleared)
 	    rate (level-rate level))
       (loop :for i :in (nreverse rows-to-zap)
-	 :do
-	   (zap-line o i (aref *piece-char* 0))
-	   ;; Copy all the above rows down
-	   (loop :for l :from i :downto 1 :do
-		(loop :for x :from 0 :below width
-		   :do (setf (aref board l x) (aref board (1- l) x))))
-	   ;; Make the top row blank.
-	   (loop :for x :from 0 :below width
-	      :do (setf (aref board 0 x) +blank+))))))
+        :do
+	(zap-line o i (aref *piece-char* 0))
+	;; Copy all the above rows down
+	(loop :for l :from i :downto 1 :do
+	  (loop :for x :from 0 :below width
+	    :do (setf (aref board l x) (aref board (1- l) x))))
+	;; Make the top row blank.
+	(loop :for x :from 0 :below width
+	  :do (setf (aref board 0 x) +blank+))))))
 
 (defun land-piece (piece)
   "Make the block land and become part of the board. Also load the next piece."
@@ -505,7 +505,7 @@
     (let ((p (piece-bits piece)))
       (loop :for y :from 0 :below (length p) :do
         (loop :for x :from 0 :below (length (aref p y)) :do
-          (when (and (plusp (aref (aref p y) x))
+	  (when (and (plusp (aref (aref p y) x))
 		     (>= (+ (piece-x piece) x) 0)
 		     (< (+ (piece-x piece) x) width))
 	    (setf (aref board
@@ -543,9 +543,9 @@
 (defun drop (o)
   (with-slots (current score down-count) o
     (loop
-       :do (incf (piece-y current))
-       :while (not (collision-p current))
-       :do
+      :do (incf (piece-y current))
+      :while (not (collision-p current))
+      :do
 	 (incf down-count)
 	 (update-display o)
 	 (tt-finish-output)
@@ -578,7 +578,7 @@
   (setf (paused o) t)
   (update-display o)
   (when (confirm-box "Really?" '("Really quit? (y / n)"))
-    (setf (inator-quit-flag o) t))
+	(setf (inator-quit-flag o) t))
   (setf (paused o) nil))
 
 (defmethod new-game ((o tetris))
@@ -586,7 +586,7 @@
   (setf (paused o) t)
   (update-display o)
   (when (confirm-box "Really?" '("Restart the game? (y / n)"))
-    (restart-game))
+	(restart-game))
   (setf (paused o) nil))
 
 (defun draw-piece (piece &key (x 0) (y 0) bg)
@@ -595,32 +595,32 @@
     (loop :for py :from 0 :below (length p) :do
       (loop :with c
         :for px :from 0 :below (length (aref p py)) :do
-           (if (plusp (aref (aref p py) px))
-	       (progn
-		 (setf c (aref *piece-char* (piece-style piece)))
-		 (tt-write-char-at (+ (piece-y piece) y py)
-				   (+ (* (piece-x piece) *block-width*)
-				      x (* px *block-width*)) c)
-		 (tt-write-char c))
-	       (when bg
-		 (setf c bg)
-		 (tt-write-char-at (+ (piece-y piece) y py)
-				   (+ (* (piece-x piece) *block-width*)
-				      x (* px *block-width*)) c)))))))
+	  (if (plusp (aref (aref p py) px))
+	      (progn
+		(setf c (aref *piece-char* (piece-style piece)))
+		(tt-write-char-at (+ (piece-y piece) y py)
+				  (+ (* (piece-x piece) *block-width*)
+				     x (* px *block-width*)) c)
+		(tt-write-char c))
+	      (when bg
+		(setf c bg)
+		(tt-write-char-at (+ (piece-y piece) y py)
+				  (+ (* (piece-x piece) *block-width*)
+				     x (* px *block-width*)) c)))))))
 
 (defun draw-all-pieces ()
   (with-terminal ()
     (tt-home)
     (tt-erase-below)
     (loop :with y = 0 :and bits
-       :for style :from 1 :to 7 :do
-	 (loop :with x = 0 :and p
-	    :for rot :from 0 :below 4 :do
-	      (setf p (make-piece :x x :y y :orientation rot :style style)
-		    bits (piece-bits p))
-	      (draw-piece p :bg #\.)
-	      (incf x (1+ (length (aref bits 0)))))
-	 (incf y (1+ (length bits))))
+      :for style :from 1 :to 7 :do
+        (loop :with x = 0 :and p
+	  :for rot :from 0 :below 4 :do
+	    (setf p (make-piece :x x :y y :orientation rot :style style)
+		  bits (piece-bits p))
+	    (draw-piece p :bg #\.)
+	    (incf x (1+ (length (aref bits 0)))))
+	(incf y (1+ (length bits))))
     (tt-get-key)))
 
 (defun show-tetris-scores (o &optional (pause-after t))
@@ -657,11 +657,12 @@
 	       (:underline ,(format nil "~16a" "Time")) #\space)))
       (tt-write-string (osubseq line 0 (min (- (tt-width) left 3)
 					    (olength line))))
-      (loop :with s
-	 :for i :from 0 :below (- lines 3)
-	 :for sl = (scores-scores scores) :then (cdr sl)
-	 :while sl
-	 :do
+      (loop
+	:with s
+	:for i :from 0 :below (- lines 3)
+	:for sl = (scores-scores scores) :then (cdr sl)
+	:while sl
+	:do
 	   (setf s (car sl))
 	   (tt-move-to (+ top 2 i) (1+ left))
 	   (tt-write-char #\space)
@@ -672,7 +673,7 @@
 		   (if s
 		       (format str "~10d ~10a ~16a"
 			       (score-n s) (score-name s)
-			       (dlib-misc:format-date
+			       (format-date
 				"~d-~2,'0d-~2,'0d ~2,'0d:~2,'0d"
 				(:year :month :date :hours :minutes)
 				:time (score-time s)))
@@ -682,7 +683,7 @@
 	   (when (our-score-p o s)
 	     (tt-inverse nil))
 	   ;;(tt-write-char #\space)
-	   )
+	)
       (tt-finish-output)
       (when pause-after
 	(tt-get-key)))))
@@ -717,25 +718,25 @@
   ;; space - reset           - проБел - сбросить
   (tt-write-string-at 11 41 "Keys:")
   (loop :with line
-     :for k :in '(("q"           . "Quit")
-		  ("d / 7"       . "Rotate Left")
-		  ("f / 9"       . "Roate Right")
-		  ("<left>  / h" . "Move left")
-		  ("<right> / l" . "Move right")
-		  ("space"       . "Drop piece")
-		  ("p / s"       . "Pause / Show scores")
-		  ("o"           . "Options")
-		  ("n"           . "New Game"))
-     :for i :from 0
-     :do
-       (setf line (format nil "~14a = ~a" (car k) (cdr k)))
-       (tt-move-to (+ 13 i) 41)
-       (tt-write-string (subseq line 0 (min (- (tt-width) 42)
-					    (length line))))))
+    :for k :in '(("q"           . "Quit")
+		 ("d / 7"       . "Rotate Left")
+		 ("f / 9"       . "Roate Right")
+		 ("<left>  / h" . "Move left")
+		 ("<right> / l" . "Move right")
+		 ("space"       . "Drop piece")
+		 ("p / s"       . "Pause / Show scores")
+		 ("o"           . "Options")
+		 ("n"           . "New Game"))
+    :for i :from 0
+    :do
+      (setf line (format nil "~14a = ~a" (car k) (cdr k)))
+      (tt-move-to (+ 13 i) 41)
+      (tt-write-string (subseq line 0 (min (- (tt-width) 42)
+					   (length line))))))
 
 (defun set-bg-fill (x width)
   (let ((color
-	 (- 1 (+ .434 (/ (* x .376) width)))))
+	  (- 1 (+ .434 (/ (* x .376) width)))))
     (tt-color :black
 	      (vector :rgb
 		      (max 0 (- color .3))
@@ -747,6 +748,8 @@
     (vector :rgb8 grey grey grey)))
 
 (defun paused-char (o y x)
+  "Return the character to fill the paused screen of game ‘o’ with at ‘y’
+and ‘x’."
   (with-slots (high-color width height) o
     (if (high-color o)
 	(make-fatchar
@@ -766,48 +769,48 @@
 
     ;; Write borders and board contents.
     (loop :with c :and grey :and style
-       :for y :from 0 :below height :do
-	 (tt-color :white :black)
-	 (tt-write-char-at y (1- *board-left*) #\<)
-	 (if high-color
-	     (tt-color :black (setf grey (grey-fill-color y height)))
-	     (tt-color :black :white))
-	 (tt-write-string-at y *board-left* "[]")
-	 (loop :for x :from 0 :below width
+      :for y :from 0 :below height :do
+        (tt-color :white :black)
+	(tt-write-char-at y (1- *board-left*) #\<)
+	(if high-color
+	    (tt-color :black (setf grey (grey-fill-color y height)))
+	    (tt-color :black :white))
+	(tt-write-string-at y *board-left* "[]")
+	(loop :for x :from 0 :below width
 	      :for x1 :from 0 :below (* width 2) :by 2
-	    :do
-              (setf style (aref (board o) y x))
-	      (setf c
-		    (cond
-		      ((and paused (not debug-flag)) (paused-char o x y))
-		      ((and high-color (zerop style))
-		       (set-bg-fill x1 (* width 2))
-		       #\space)
-		      (t
-		       (aref *piece-char* style))))
-              (tt-write-char-at y (+ *board-left* *block-width*
-				     (* x *block-width*)) c)
-	      (set-bg-fill (1+ x1) (* width 2))
-	      (tt-write-char c))
-	 (if high-color
-	     (tt-color :black grey)
-	     (tt-color :black :white))
-	 (tt-write-string "[]")
-	 (tt-color :white :black)
-	 (tt-write-char #\>))
+	      :do
+		 (setf style (aref (board o) y x))
+		 (setf c
+		       (cond
+			 ((and paused (not debug-flag)) (paused-char o x y))
+			 ((and high-color (zerop style))
+			  (set-bg-fill x1 (* width 2))
+			  #\space)
+			 (t
+			  (aref *piece-char* style))))
+		 (tt-write-char-at y (+ *board-left* *block-width*
+					(* x *block-width*)) c)
+		 (set-bg-fill (1+ x1) (* width 2))
+		 (tt-write-char c))
+	     (if high-color
+		 (tt-color :black grey)
+		 (tt-color :black :white))
+	     (tt-write-string "[]")
+	     (tt-color :white :black)
+	     (tt-write-char #\>))
     (tt-move-to height (1- *board-left*))
     (tt-write-char #\<)
     (tt-color :black :white)
 
     (loop :with w = (* (+ width *block-width*) 2)
-       :for i :from 0 :below w :by 2
-       :do
-	 (when high-color
-	   (tt-color :black (grey-fill-color i w)))
-	 (tt-write-string "[")
-	 (when high-color
-	   (tt-color :black (grey-fill-color (1+ i) w)))
-	 (tt-write-string "]"))
+	  :for i :from 0 :below w :by 2
+	  :do
+	     (when high-color
+	       (tt-color :black (grey-fill-color i w)))
+	     (tt-write-string "[")
+	     (when high-color
+	       (tt-color :black (grey-fill-color (1+ i) w)))
+	     (tt-write-string "]"))
 
     (tt-color :white :black)
     (tt-write-char #\>)
@@ -863,10 +866,10 @@
   (char-equal
    #\y
    (loop :with c
-      :do
-	(setf c (fui:display-text title message :y 9 :x 10))
-      :until (member c '(#\y #\n) :test #'char-equal)
-      :finally (return c))))
+	 :do
+	    (setf c (fui:display-text title message :y 9 :x 10))
+	 :until (member c '(#\y #\n) :test #'char-equal)
+	 :finally (return c))))
 
 (defparameter *plain-acs-table* nil)
 
@@ -874,8 +877,8 @@
   "Play Tetris."
   (when (< (tt-height) 20)
     (fui:display-text "Called off!"
-       '("I'm sorry, but your terminal doesn't have enough lines to play
-          Tetris properly. Try making your window at least 20 lines high."))
+      '("I'm sorry, but your terminal doesn't have enough lines to play
+         Tetris properly. Try making your window at least 20 lines high."))
     (return-from tetris nil))
   (when (and plain high-color)
     (error "Plain and High-Color are contradictory settings. Please only use ~
@@ -902,11 +905,11 @@
       ;; 	((tt-alternate-characters nil))
       (tt-clear)
       (unwind-protect
-           (progn
+	   (progn
 	     (tt-cursor-off)
 	     (with-slots (game-over scores score score-time) *tetris*
 	       (loop
-		  :do
+		 :do
 		    (when game-over
 		      (restart-game))
 		    (event-loop *tetris*)
@@ -915,7 +918,7 @@
 					      :n score)))
 			(save-score scores s)
 			(setf score-time (score-time s))))
-		  :while
+		 :while
 		    (and game-over
 			 (progn
 			   (show-tetris-scores *tetris* nil)
@@ -932,6 +935,6 @@
    (high-color boolean :short-arg #\c :help "True to use lots of colors."))
   "Zone out with a certain gang of blocks."
   (catch nil
-    (tetris :high-color high-color :plain plain)))
+	(tetris :high-color high-color :plain plain)))
 
 ;; EOF
