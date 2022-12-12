@@ -227,7 +227,7 @@
 
 (defparameter *piece-char* *low-color-piece-char*)
 
-(defkeymap *tetris-keymap*
+(defkeymap *tetris-keymap* ()
   `((:up      . rotate-right)
     (#\f      . rotate-right)
     (#\d      . rotate-left)
