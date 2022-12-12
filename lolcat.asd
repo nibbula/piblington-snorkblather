@@ -10,6 +10,6 @@
     :license            "GPL-3.0-only"
     :source-control	:git
     :long-description   "Now I am indeed the king of cats!"
-    :depends-on (:dlib :fatchar :terminal :color :color-names)
+    :depends-on (:dlib :fatchar :terminal :dcolor :color-names)
     :components
     ((:file "lolcat")))
