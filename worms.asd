@@ -7,7 +7,7 @@
     :description        "The pure happiness of my worm."
     :version            "0.1.0"
     :author             "Nibby Nebbulous <nibbula@yahoo.com>"
-    :licence            "GPLv3"
+    :licence            "GPL-3.0-only"
     :source-control	:git
     :long-description   "Now you too can have some new worms."
     :depends-on (:curses)
