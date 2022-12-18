@@ -4,7 +4,8 @@
 
 (defpackage :2048-game
   (:documentation "Mindless doubling.")
-  (:use :cl :dlib :inator :terminal :terminal-inator :keymap :scores)
+  (:use :cl :dlib :inator :terminal :terminal-inator :keymap :scores :fatchar
+	:terminal-utils)
   (:export
    #:play
    ))
@@ -29,7 +30,8 @@
     (#\w      . move-up)
     (#\d      . move-right)
 
-    (#\s      . show-scores)
+    (#\?      . help)
+    (#\space  . show-scores)
     (#\n      . new-game)
     (#\q      . quit)
     (#\escape . quit)))
@@ -45,6 +47,10 @@
 (defstruct piece
   value
   merged)
+
+(defparameter *piece-width* 6)
+(defparameter *piece-height* 3)
+(defparameter *winning-value* 2048)
 
 (defclass 2048-game (terminal-inator)
   ((board
@@ -62,22 +68,27 @@
    (board-y
     :initarg :board-y :accessor board-y :type integer :initform 0
     :documentation "Vertical coordinate of the board.")
-   (game-over
-    :initarg :game-over :accessor game-over :type boolean :initform nil
-    :documentation "True if the games is over.")
+   (restart-game-p
+    :initarg :restart-game-p :accessor restart-game-p
+    :type boolean :initform nil
+    :documentation "True to restart the game.")
    (score
     :initarg :score :accessor score :type integer :initform 0
     :documentation "Points accumulated for the current game.")
-   (score-time
-    :initarg :score-time :accessor score-time :type integer :initform 0
-    :documentation "Time the score happened.")
+   ;; (score-time
+   ;;  :initarg :score-time :accessor score-time :type integer :initform 0
+   ;;  :documentation "Time the score happened.")
    (scores
     :initarg :scores :accessor scores :type 2048-scores
     :initform (make-scores '2048-scores '2048-score-v1)
     :documentation "High score list."))
   (:default-initargs
    :keymap `(,*2048-keymap* ,*default-inator-keymap*))
-  (:documentation "The 2048 game state."))
+  (:documentation
+   "The famously boring 2048 game.
+
+Keep fusing number blocks by mashing them all in one direction
+until you get the big one."))
 
 (defun initialize-board (o)
   "Make the board empty."
@@ -86,6 +97,14 @@
       (loop :for x :from 0 :below board-width :do
         (setf (aref board y x) (make-piece))))))
 
+(defun center-board (o)
+  (let ((grid-width  (1+ (* (slot-value o 'board-width) (1+ *piece-width*))))
+	(grid-height (1+ (* (slot-value o 'board-width) (1+ *piece-height*)))))
+    (setf (slot-value o 'board-x)
+	  (- (truncate (tt-width) 2) (* 2 (round grid-width 3)))
+	  (slot-value o 'board-y)
+	  (min 3 (max 0 (- (tt-height) grid-height))))))
+
 (defmethod initialize-instance
     :after ((o 2048-game) &rest initargs &key &allow-other-keys)
   "Initialize a 2048-game."
@@ -93,11 +112,13 @@
   (setf (slot-value o 'board)
 	(make-array (list (slot-value o 'board-width)
 			  (slot-value o 'board-height))))
+  ;; Center the grid
+  (center-board o)
   (initialize-board o))
 
 (defun next-piece (o)
   "Add a new piece in a random free spot."
-  (with-slots (board board-width board-height game-over) o
+  (with-slots (board board-width board-height restart-game-p) o
     (let* ((len 0)
 	   (free-spaces (loop :for i :from 0 :below (array-total-size board)
 			      :when (null (piece-value (row-major-aref board i)))
@@ -109,40 +130,83 @@
 		 (row-major-aref board (elt free-spaces (random len))))
 		(if (zerop (random 2)) 2 4))
 	  ;; No more free spaces. @@@@ shouldn't lose until no moves
-	  (if (confirm-box "Game Over" '("Play again? (y / n)"))
-	      (restart-game)
-	      (setf (inator-quit-flag o) t
-		    game-over t))))))
+	  (progn
+	    (setf (inator-quit-flag o) t)
+	    (when (confirm-box "Game Over" '("Play again? (y / n)"))
+	      (setf restart-game-p t)))))))
 
 (defmethod quit ((o 2048-game))
   "Quit the game."
   (when (confirm-box "Really?" '("Really quit? (y / n)"))
-	(setf (inator-quit-flag o) t)))
+    (setf (inator-quit-flag o) t
+	  ;; Don't save the score when quitting.
+	  (score o) 0)))
+
+(defmethod resize ((o 2048-game))
+  (center-board o))
 
 (defmethod new-game ((o 2048-game))
   "Restart the game."
   (when (confirm-box "Really?" '("Restart the game? (y / n)"))
-	(restart-game)))
+    (restart-game)))
+
+(defvar *exclaim*
+  #("Holy shit!! You WON!"
+    "I can't believe it, but, you WON!?!?!"
+    "WTF!! You won!!!!!!"
+    "Holy Heckin' Flippers!! You WON!"
+    "Incredible!! You fucking WON!"
+    "Gosh double dang it!! You actually Won!?!"
+    "NO WAY! You Won??!?!"))
+
+(defun win-exclaim ()
+  (ß `(:cyan ,(aref *exclaim* (random (length *exclaim*))))))
 
 (defun restart-game ()
-  (with-slots (score score-time game-over) *game*
+  (with-slots (score restart-game-p) *game*
     (setf score 0
-	  score-time 0
-	  game-over nil
+	  restart-game-p nil
 	  (inator-quit-flag *game*) nil)
     (initialize-board *game*)
     (next-piece *game*)))
 
 (defun show-scores (o)
-  (declare (ignore o)) ;; @@@
-  )
+  "Show the high scores."
+  (with-slots (scores) o
+    (read-scores scores)
+    (fui:show-text
+     (with-terminal-output-to-fat-string (:trim t)
+       (table-print:print-table
+	(table:make-table-from
+	 (loop :for s :in
+		  (sort-muffled (scores-scores scores) #'>
+					:key #'score-n)
+	       :for i :from 0 :below (- (tt-height) 4)
+	       :collect s)
+	 :columns `((:name "Score")
+		    (:name "Name")
+		    (:name "Date"
+		     :format ,(lambda (c w)
+				(declare (ignore w))
+				(dtime:date-string :time c)))))
+	:long-titles t
+	:print-titles t
+	:stream *terminal*
+	:renderer (make-instance
+                   ;; 'terminal-table:terminal-box-table-renderer
+                   ;; :box-style table-print::*fancy-box*
+                   ;; :box-color :magenta :title-color :cyan :x 0
+                   'terminal-table:terminal-table-renderer
+		   )))
+     :title "High Scores")))
 
+#|
 (defun dork (o)
  (declare (ignore o))
-  ;; (update-display o)
-  ;; (when (eql #\q (tt-get-key))
-  ;;   (break))
-  )
+  (update-display o)
+  (when (eql #\q (tt-get-key))
+    (break)))
+|#
 
 (defun coords (o x-off y-off)
   "Return a list of coordinates we should traverse for moving in the direction
@@ -195,6 +259,7 @@ indicated by ‘x-off’ and ‘y-off’ for the game board ‘o’."
 	   (start-y (if v (if (minusp y-off) 1 (1- end-y)) 0))
 	   ;; (x start-x)
 	   ;; (y start-y)
+	   (val 0)
 	   )
       (when (and h (plusp x-off)) (setf end-x 0))
       (when (and v (plusp y-off)) (setf end-y 0))
@@ -251,17 +316,26 @@ indicated by ‘x-off’ and ‘y-off’ for the game board ‘o’."
 		  ;; (dbugf :gg "join ~s ~s~%"
 		  ;; 	 (piece-value (aref board (+ iy y-off) (+ ix x-off)))
 		  ;; 	 (value ix iy))
+		  (setf val (* 2 (value ix iy)))
 		  (incf (piece-value (aref board (+ iy y-off) (+ ix x-off)))
 			(value ix iy))
 		  (incf score (value ix iy))
 		  (setf (piece-merged (aref board (+ iy y-off) (+ ix x-off))) t)
+		  (when (= *winning-value* val)
+		    (make-empty ix iy)
+		    (update-display o)
+		    (when (not (confirm-box "You Won!"
+					    `(,(win-exclaim)
+					      ""
+					      "Keep playing? (y / n)")))
+		      (setf (inator-quit-flag o) t)))
 		  (make-empty ix iy))
 		 (t ;; Otherwise we've been stopped
 		  (dbugf :gg "stop~%")
 		  (return nil)))
 	       (incf ix x-off)
 	       (incf iy y-off)
-	       (dork o)
+	       ;; (dork o)
 	       )))
 	(loop :for (x . y) in (coords o x-off y-off)
 	  :do
@@ -273,22 +347,31 @@ indicated by ‘x-off’ and ‘y-off’ for the game board ‘o’."
 	(clear-merged o)
 	))))
 
-(defun move-left  (o)  (move-dir o -1  0))
-(defun move-down  (o)  (move-dir o  0  1))
-(defun move-up    (o)  (move-dir o  0 -1))
-(defun move-right (o)  (move-dir o  1  0))
+(defun move-left  (o)
+  "Move the blocks left."
+  (move-dir o -1  0))
+
+(defun move-down (o)
+  "Move the blocks down."
+  (move-dir o  0  1))
+
+(defun move-up (o)
+  "Move the blocks up."
+  (move-dir o  0 -1))
+
+(defun move-right (o)
+  "Move the blocks right."
+  (move-dir o  1  0))
 
 (defun confirm-box (title message)
   (char-equal
    #\y
    (loop :with c
 	 :do
-	    (setf c (fui:display-text title message :y 9 :x 10))
-	 :until (member c '(#\y #\n) :test #'char-equal)
+	    (setf c (fui:display-text title message :y 9 #|:x 10 |#))
+	 :until (and (characterp c)
+		     (member c '(#\y #\n) :test #'char-equal))
 	 :finally (return c))))
-
-(defparameter *piece-width* 6)
-(defparameter *piece-height* 3)
 
 (defun piece-y (y)
   (+ (board-y *game*) 1 (* y (+ *piece-height* 1))))
@@ -333,6 +416,7 @@ indicated by ‘x-off’ and ‘y-off’ for the game board ‘o’."
 	    ;; (tt-get-key)
 	    )
           (tt-newline))
+	(tt-move-to-col board-x)
         (tt-write-string
          (if (= y (1- board-height))
              "└────────┴────────┴────────┴────────┘"
@@ -360,29 +444,22 @@ indicated by ‘x-off’ and ‘y-off’ for the game board ‘o’."
     (let ((*game* (make-instance '2048-game)))
       (tt-clear)
       (unwind-protect
-	   (with-slots (game-over scores score score-time) *game*
+	   (with-slots (scores score restart-game-p) *game*
 	     (tt-cursor-off)
 	     (loop :do
-	       (when game-over
+	       (when restart-game-p
 		 (restart-game))
 	       ;; (setf (piece-value (aref (board *game*) 0 3)) 2)
 	       (next-piece *game*)
 	       (event-loop *game*)
 
 	       ;; Save the score
-	       (when (and game-over (not (zerop score)))
+	       (when (not (zerop score))
 		 (let ((s (make-instance '2048-score-v1
 					 :n score)))
-		   (save-score scores s)
-		   (setf score-time (score-time s))))
-	       :while (and *game*
-			   (and (not (inator-quit-flag *game*))
-				(progn
-				  ;; Show the scores and ask to play again.
-				  (show-scores *game*)
-				  (confirm-box
-				   "Game Over"
-				   '("Play again? (y / n)"))))))
+		   (save-score scores s)))
+
+	       :while restart-game-p)
 	     ;; Final update
 	     (update-display *game*))
 	;; Go to the bottom and turn the cursor back on.

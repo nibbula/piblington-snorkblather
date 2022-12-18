@@ -10,6 +10,7 @@
     :license            "GPL-3.0-only"
     :source-control	:git
     :long-description   "2048 Game"
-    :depends-on (:dlib :inator :terminal-inator :keymap :scores)
+    :depends-on (:dlib :inator :terminal-inator :keymap :scores :terminal-utils
+		 :table :table-print :fui :dtime :terminal-table)
     :components
     ((:file "2048-game")))
